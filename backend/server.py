@@ -437,16 +437,29 @@ async def get_heatmap_data(
         if end_date:
             uplink_query["timestamp"]["$lte"] = end_date
     
+    # Optimized: Batch fetch latest uplinks for all devices in one query (avoid N+1)
+    dev_euis = [d["dev_eui"] for d in devices]
+    uplink_match = {**uplink_query, "dev_eui": {"$in": dev_euis}} if dev_euis else uplink_query
+    
+    pipeline = [
+        {"$match": uplink_match},
+        {"$sort": {"timestamp": -1}},
+        {"$group": {
+            "_id": "$dev_eui",
+            "rssi": {"$first": "$rssi"},
+            "snr": {"$first": "$snr"},
+            "timestamp": {"$first": "$timestamp"}
+        }}
+    ]
+    
+    latest_uplinks_list = await db.uplinks.aggregate(pipeline).to_list(1000)
+    uplink_map = {u["_id"]: u for u in latest_uplinks_list}
+    
     heatmap_points = []
     
     for device in devices:
-        # Get latest uplink for additional data (RSSI, SNR)
-        device_query = {**uplink_query, "dev_eui": device["dev_eui"]}
-        latest_uplink = await db.uplinks.find_one(
-            device_query,
-            {"_id": 0},
-            sort=[("timestamp", -1)]
-        )
+        # Get latest uplink from pre-fetched map
+        latest_uplink = uplink_map.get(device["dev_eui"])
         
         # Get SF average from device (calculated from buffer)
         sf_buffer = device.get("sf_buffer", [])
