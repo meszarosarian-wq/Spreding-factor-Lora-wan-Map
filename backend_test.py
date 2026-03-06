@@ -261,7 +261,7 @@ class LoRaWANAPITester:
         return success
 
     def test_chirpstack_webhook(self):
-        """Test ChirpStack webhook endpoint"""
+        """Test ChirpStack webhook endpoint with V1.1 SF buffer updates"""
         # First get a device to use in webhook test
         success, devices = self.run_test("Get Devices for Webhook", "GET", "devices", 200)
         if not success or not devices:
@@ -269,6 +269,7 @@ class LoRaWANAPITester:
             return False
 
         device = devices[0]
+        initial_buffer_size = len(device.get('sf_buffer', []))
         
         # Test webhook payload
         webhook_payload = {
@@ -292,6 +293,31 @@ class LoRaWANAPITester:
                 self.log_test("Webhook - Success status", True)
             else:
                 self.log_test("Webhook - Success status", False, "Missing success status")
+            
+            # Check if SF buffer size is reported
+            if 'sf_buffer_size' in response:
+                new_buffer_size = response['sf_buffer_size']
+                if new_buffer_size > initial_buffer_size:
+                    self.log_test("Webhook - SF buffer updated", True)
+                else:
+                    self.log_test("Webhook - SF buffer updated", False, f"Buffer size didn't increase: {initial_buffer_size} -> {new_buffer_size}")
+            else:
+                self.log_test("Webhook - SF buffer size reported", False, "Missing sf_buffer_size in response")
+        
+        # Verify device was updated by getting it again
+        time.sleep(1)  # Small delay to ensure update is processed
+        success, updated_device = self.run_test("Get Updated Device", "GET", f"devices/{device['id']}", 200)
+        if success:
+            if 'sf_buffer' in updated_device and len(updated_device['sf_buffer']) > initial_buffer_size:
+                self.log_test("Webhook - Device SF buffer updated", True)
+            else:
+                self.log_test("Webhook - Device SF buffer updated", False, "Device SF buffer not updated")
+            
+            if 'sf_average' in updated_device and updated_device['sf_average'] is not None:
+                self.log_test("Webhook - SF average calculated", True)
+            else:
+                self.log_test("Webhook - SF average calculated", False, "SF average not calculated")
+        
         return success
 
     def test_seed_endpoint(self):
