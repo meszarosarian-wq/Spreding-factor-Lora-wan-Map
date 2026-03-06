@@ -72,8 +72,10 @@ class UplinkLog(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     dev_eui: str
     device_name: Optional[str] = None
+    device_registered: bool = False  # Flag to indicate if device is in our database
     gateway_id: Optional[str] = None
     gateway_name: Optional[str] = None
+    gateway_registered: bool = False  # Flag to indicate if gateway is in our database
     rssi: int
     snr: float
     spreading_factor: int
