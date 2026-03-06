@@ -1,0 +1,137 @@
+{
+  "identity": {
+    "persona": "E1",
+    "vibe": "Tactical Minimalism / Command Center",
+    "principles": [
+      "Fusion over Imitation: Mix Military HUD precision with SaaS usability.",
+      "Emotion First: The user is an Operator. The UI must feel reliable, fast, and precise.",
+      "Content is King: Data is the hero. No decorative fluff. Every pixel serves the signal.",
+      "Zoom In: High density data, but clear hierarchy.",
+      "Negative Space: Use it to group functional areas, not just for aesthetics."
+    ]
+  },
+  "typography": {
+    "fonts": {
+      "heading": "Chivo",
+      "body": "Inter",
+      "mono": "JetBrains Mono"
+    },
+    "usage": {
+      "h1": "font-heading font-bold text-4xl tracking-tight text-white",
+      "h2": "font-heading font-semibold text-2xl tracking-tight text-zinc-100",
+      "h3": "font-heading font-medium text-xl text-zinc-200",
+      "body": "font-body text-base text-zinc-400 leading-relaxed",
+      "label": "font-mono text-xs uppercase tracking-wider text-zinc-500",
+      "data": "font-mono text-sm text-zinc-300"
+    }
+  },
+  "colors": {
+    "palette": {
+      "background": "#09090b",
+      "surface": "#18181b",
+      "surface_highlight": "#27272a",
+      "border": "#27272a",
+      "primary": "#3b82f6",
+      "primary_foreground": "#ffffff",
+      "secondary": "#27272a",
+      "secondary_foreground": "#fafafa",
+      "muted": "#27272a",
+      "muted_foreground": "#a1a1aa",
+      "accent": "#27272a",
+      "accent_foreground": "#fafafa",
+      "destructive": "#7f1d1d",
+      "destructive_foreground": "#fef2f2"
+    },
+    "functional": {
+      "sf_good": "#10b981",
+      "sf_medium": "#f59e0b",
+      "sf_bad": "#ef4444",
+      "gateway_active": "#3b82f6",
+      "gateway_inactive": "#71717a"
+    },
+    "gradients": {
+      "none": "Avoid gradients. Use solid colors and 1px borders for definition."
+    }
+  },
+  "layout": {
+    "grid_system": "Bento Grid Mode B (High Density)",
+    "spacing": {
+      "container_padding": "p-6 md:p-8",
+      "item_gap": "gap-4",
+      "internal_padding": "p-4"
+    },
+    "structure": {
+      "dashboard": "grid grid-cols-1 md:grid-cols-4 gap-4 h-[calc(100vh-4rem)]",
+      "sidebar": "hidden",
+      "header": "h-16 border-b border-zinc-800 bg-zinc-950/50 backdrop-blur-xl sticky top-0 z-50"
+    }
+  },
+  "components": {
+    "cards": {
+      "style": "bg-zinc-900 border border-zinc-800 rounded-none md:rounded-sm shadow-none",
+      "hover": "hover:border-zinc-700 transition-colors duration-200"
+    },
+    "buttons": {
+      "primary": "bg-blue-600 hover:bg-blue-500 text-white rounded-sm font-medium px-4 py-2 shadow-[0_0_10px_rgba(59,130,246,0.2)]",
+      "secondary": "bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 rounded-sm px-4 py-2",
+      "ghost": "hover:bg-zinc-800 text-zinc-400 hover:text-white rounded-sm px-3 py-1.5"
+    },
+    "inputs": {
+      "style": "bg-zinc-950 border border-zinc-800 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-sm text-zinc-200 placeholder:text-zinc-600"
+    },
+    "tables": {
+      "header": "bg-zinc-900/50 text-zinc-500 font-mono text-xs uppercase tracking-wider border-b border-zinc-800",
+      "row": "border-b border-zinc-800/50 hover:bg-zinc-900/50 transition-colors",
+      "cell": "py-3 px-4 text-sm text-zinc-300 font-mono"
+    },
+    "map": {
+      "provider": "Leaflet",
+      "tiles": "CartoDB Dark Matter (https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png)",
+      "attribution": "&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> contributors &copy; <a href='https://carto.com/attributions'>CARTO</a>",
+      "marker_style": "CircleMarker with radius 6, fillOpacity 0.8, stroke width 1"
+    }
+  },
+  "visual_enhancers": {
+    "borders": "1px solid #27272a (Zinc 800)",
+    "shadows": "none",
+    "glassmorphism": "backdrop-blur-md bg-zinc-950/80 border-b border-zinc-800 (Header only)",
+    "textures": "Subtle noise overlay on background (optional, use opacity 0.02)"
+  },
+  "assets": {
+    "icons": "Lucide React (default)",
+    "images": {
+      "gateway_hero": "https://images.unsplash.com/photo-1724689830597-4374001ccc6b",
+      "device_hero": "https://images.unsplash.com/photo-1631642235713-a4a84b325f6b",
+      "network_bg": "https://images.unsplash.com/photo-1764103659005-b7f14d25ce1a",
+      "sensor_abstract": "https://images.unsplash.com/photo-1658713981078-cc13b54dd40c"
+    }
+  },
+  "libraries_to_install": [
+    "leaflet",
+    "react-leaflet",
+    "papaparse"
+  ],
+  "instructions_to_main_agent": [
+    "Implement the 'Tactical Minimalism' theme. Avoid rounded corners > 4px.",
+    "Use 'JetBrains Mono' or standard monospace for all numerical data (RSSI, SNR, SF, Coordinates).",
+    "The Map is the centerpiece. Ensure it takes up significant screen real estate on the Dashboard.",
+    "For the Heatmap: Use the SF color coding strictly (Green=SF7-8, Orange=SF9-10, Red=SF11-12).",
+    "Gateways and Devices pages should use dense data tables.",
+    "Import CSV feature must parse: DevEUI, Name, Latitude, Longitude.",
+    "Ensure the Webhook endpoint is clearly documented or simulated in the UI logs.",
+    "Use 'sonner' for all notifications (e.g., 'Device Imported', 'Gateway Updated').",
+    "Do NOT use gradients for backgrounds. Use solid Zinc-950.",
+    "Ensure all interactive elements have data-testid attributes."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "Dark colors look good when used independently without gradients. DO NOT use dark colors as gradients.",
+    "Don't make generic centered layouts. Use grids.",
+    "Create depth through z-index hierarchy, not heavy shadows.",
+    "Every interaction needs micro-animations (hover states, transitions).",
+    "Use 2-3x more spacing than feels comfortable inside containers, but keep data dense.",
+    "NEVER use AI assistant Emoji characters.",
+    "Prioritize using pre-existing components from src/components/ui.",
+    "Components MUST use named exports.",
+    "Pages MUST use default exports."
+  ]
+}
