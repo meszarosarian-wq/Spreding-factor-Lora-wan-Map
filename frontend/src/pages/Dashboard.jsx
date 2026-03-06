@@ -12,8 +12,14 @@ import { format } from "date-fns";
 import { ro } from "date-fns/locale";
 import { 
   Router, Radio, Activity, TrendingUp, 
-  CalendarIcon, X, RefreshCw
+  CalendarIcon, X, RefreshCw, Info
 } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -32,19 +38,27 @@ const gatewayIcon = L.divIcon({
   iconAnchor: [12, 12],
 });
 
-// Get SF color based on spreading factor
-const getSFColor = (sf) => {
-  if (sf === null || sf === undefined) return "#71717a";
-  if (sf <= 8) return "#10b981"; // Green - Good
-  if (sf <= 10) return "#f59e0b"; // Orange - Medium
-  return "#ef4444"; // Red - Bad
+// Get SF color based on AVERAGE spreading factor (using new thresholds)
+const getSFColor = (sfAvg) => {
+  if (sfAvg === null || sfAvg === undefined) return "#71717a";
+  if (sfAvg <= 8.5) return "#10b981"; // Green - Good (7.0-8.5)
+  if (sfAvg <= 10.5) return "#f59e0b"; // Orange - Medium (8.6-10.5)
+  return "#ef4444"; // Red - Bad (10.6+)
 };
 
-const getSFLabel = (sf) => {
-  if (sf === null || sf === undefined) return "N/A";
-  if (sf <= 8) return "Excelent";
-  if (sf <= 10) return "Mediu";
+const getSFLabel = (sfAvg) => {
+  if (sfAvg === null || sfAvg === undefined) return "N/A";
+  if (sfAvg <= 8.5) return "Excelent";
+  if (sfAvg <= 10.5) return "Mediu";
   return "Limită";
+};
+
+// Get marker radius based on SF (larger = worse coverage = more spread)
+const getMarkerRadius = (sfAvg) => {
+  if (sfAvg === null || sfAvg === undefined) return 8;
+  if (sfAvg <= 8.5) return 8;
+  if (sfAvg <= 10.5) return 12;
+  return 16; // Larger radius for poor coverage (spread effect)
 };
 
 export default function Dashboard() {
@@ -68,7 +82,6 @@ export default function Dashboard() {
     try {
       setLoading(true);
       
-      // Build query params
       const params = new URLSearchParams();
       if (selectedGateway && selectedGateway !== "all") {
         params.append("gateway_id", selectedGateway);
@@ -263,24 +276,39 @@ export default function Dashboard() {
       {/* Map Section */}
       <Card className="card-base" data-testid="map-card">
         <CardHeader className="pb-2">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-lg font-heading font-semibold text-zinc-100">
-              Hartă Acoperire SF
-            </CardTitle>
+          <div className="flex items-center justify-between flex-wrap gap-4">
+            <div className="flex items-center gap-2">
+              <CardTitle className="text-lg font-heading font-semibold text-zinc-100">
+                Hartă Acoperire SF
+              </CardTitle>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Info className="w-4 h-4 text-zinc-500 cursor-help" />
+                  </TooltipTrigger>
+                  <TooltipContent className="bg-zinc-800 border-zinc-700 max-w-xs">
+                    <p className="text-xs text-zinc-300">
+                      Culoarea fiecărui punct este calculată pe baza <strong>mediei ultimelor 10 valori SF</strong> primite de la dispozitiv.
+                      Punctele mai mari indică acoperire mai slabă (dispersie).
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
             
             {/* Legend */}
             <div className="sf-legend">
               <div className="sf-legend-item">
                 <div className="sf-dot sf-dot-good"></div>
-                <span className="text-zinc-400">SF7-8 Excelent</span>
+                <span className="text-zinc-400">≤8.5 Excelent</span>
               </div>
               <div className="sf-legend-item">
                 <div className="sf-dot sf-dot-medium"></div>
-                <span className="text-zinc-400">SF9-10 Mediu</span>
+                <span className="text-zinc-400">8.6-10.5 Mediu</span>
               </div>
               <div className="sf-legend-item">
                 <div className="sf-dot sf-dot-bad"></div>
-                <span className="text-zinc-400">SF11-12 Limită</span>
+                <span className="text-zinc-400">&gt;10.5 Limită</span>
               </div>
             </div>
           </div>
@@ -308,6 +336,11 @@ export default function Dashboard() {
                   <Popup>
                     <div className="p-2">
                       <p className="font-bold text-sm text-white">{gateway.name}</p>
+                      {gateway.dev_eui && (
+                        <p className="text-xs text-blue-400 font-mono mt-1">
+                          DevEUI: {gateway.dev_eui}
+                        </p>
+                      )}
                       <p className="text-xs text-zinc-400 font-mono mt-1">
                         {gateway.latitude.toFixed(6)}, {gateway.longitude.toFixed(6)}
                       </p>
@@ -319,56 +352,83 @@ export default function Dashboard() {
                 </Marker>
               ))}
 
-              {/* Render Device Heatmap Points */}
-              {heatmapData.map((point) => (
-                <CircleMarker
-                  key={point.dev_eui}
-                  center={[point.latitude, point.longitude]}
-                  radius={10}
-                  fillColor={getSFColor(point.spreading_factor)}
-                  fillOpacity={0.8}
-                  stroke={true}
-                  color="#fafafa"
-                  weight={1}
-                  data-testid={`device-marker-${point.dev_eui}`}
-                >
-                  <Popup>
-                    <div className="p-2 min-w-[180px]">
-                      <p className="font-bold text-sm text-white">{point.name}</p>
-                      <p className="text-xs text-zinc-500 font-mono">{point.dev_eui}</p>
-                      <div className="mt-2 space-y-1">
-                        <div className="flex justify-between text-xs">
-                          <span className="text-zinc-400">SF:</span>
-                          <span 
-                            className="font-mono font-bold"
-                            style={{ color: getSFColor(point.spreading_factor) }}
-                          >
-                            {point.spreading_factor ?? "N/A"} ({getSFLabel(point.spreading_factor)})
-                          </span>
+              {/* Render Device Heatmap Points with AVERAGE SF */}
+              {heatmapData.map((point) => {
+                // Use sf_average for coloring (calculated from buffer)
+                const sfValue = point.sf_average ?? point.spreading_factor;
+                const color = getSFColor(sfValue);
+                const radius = getMarkerRadius(sfValue);
+                
+                return (
+                  <CircleMarker
+                    key={point.dev_eui}
+                    center={[point.latitude, point.longitude]}
+                    radius={radius}
+                    fillColor={color}
+                    fillOpacity={0.7}
+                    stroke={true}
+                    color="#fafafa"
+                    weight={1}
+                    data-testid={`device-marker-${point.dev_eui}`}
+                  >
+                    <Popup>
+                      <div className="p-2 min-w-[200px]">
+                        <p className="font-bold text-sm text-white">{point.name}</p>
+                        <p className="text-xs text-zinc-500 font-mono">{point.dev_eui}</p>
+                        
+                        <div className="mt-3 p-2 bg-zinc-900 rounded border border-zinc-700">
+                          <div className="flex justify-between items-center mb-2">
+                            <span className="text-xs text-zinc-400 font-semibold">Media SF (últimas 10):</span>
+                            <span 
+                              className="font-mono font-bold text-lg"
+                              style={{ color }}
+                            >
+                              {sfValue !== null ? sfValue.toFixed(1) : "N/A"}
+                            </span>
+                          </div>
+                          <div className="flex justify-between text-xs">
+                            <span className="text-zinc-500">Calitate:</span>
+                            <span style={{ color }}>{getSFLabel(sfValue)}</span>
+                          </div>
+                          {point.sf_buffer_size > 0 && (
+                            <div className="flex justify-between text-xs mt-1">
+                              <span className="text-zinc-500">Măsurători:</span>
+                              <span className="text-zinc-400">{point.sf_buffer_size}/10</span>
+                            </div>
+                          )}
                         </div>
-                        {point.rssi !== null && (
+                        
+                        <div className="mt-2 space-y-1">
+                          {point.spreading_factor !== null && (
+                            <div className="flex justify-between text-xs">
+                              <span className="text-zinc-400">Ultimul SF:</span>
+                              <span className="font-mono text-zinc-300">SF{point.spreading_factor}</span>
+                            </div>
+                          )}
+                          {point.rssi !== null && (
+                            <div className="flex justify-between text-xs">
+                              <span className="text-zinc-400">RSSI:</span>
+                              <span className="font-mono text-zinc-300">{point.rssi} dBm</span>
+                            </div>
+                          )}
+                          {point.snr !== null && (
+                            <div className="flex justify-between text-xs">
+                              <span className="text-zinc-400">SNR:</span>
+                              <span className="font-mono text-zinc-300">{point.snr} dB</span>
+                            </div>
+                          )}
                           <div className="flex justify-between text-xs">
-                            <span className="text-zinc-400">RSSI:</span>
-                            <span className="font-mono text-zinc-300">{point.rssi} dBm</span>
+                            <span className="text-zinc-400">Coordonate:</span>
+                            <span className="font-mono text-zinc-300">
+                              {point.latitude.toFixed(4)}, {point.longitude.toFixed(4)}
+                            </span>
                           </div>
-                        )}
-                        {point.snr !== null && (
-                          <div className="flex justify-between text-xs">
-                            <span className="text-zinc-400">SNR:</span>
-                            <span className="font-mono text-zinc-300">{point.snr} dB</span>
-                          </div>
-                        )}
-                        <div className="flex justify-between text-xs">
-                          <span className="text-zinc-400">Coordonate:</span>
-                          <span className="font-mono text-zinc-300">
-                            {point.latitude.toFixed(4)}, {point.longitude.toFixed(4)}
-                          </span>
                         </div>
                       </div>
-                    </div>
-                  </Popup>
-                </CircleMarker>
-              ))}
+                    </Popup>
+                  </CircleMarker>
+                );
+              })}
             </MapContainer>
           </div>
         </CardContent>

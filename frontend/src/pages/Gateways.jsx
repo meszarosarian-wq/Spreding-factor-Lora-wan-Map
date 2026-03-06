@@ -32,6 +32,7 @@ export default function Gateways() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedGateway, setSelectedGateway] = useState(null);
   const [formData, setFormData] = useState({
+    dev_eui: "",
     name: "",
     latitude: "",
     longitude: "",
@@ -58,6 +59,7 @@ export default function Gateways() {
     if (gateway) {
       setSelectedGateway(gateway);
       setFormData({
+        dev_eui: gateway.dev_eui || "",
         name: gateway.name,
         latitude: gateway.latitude.toString(),
         longitude: gateway.longitude.toString(),
@@ -66,6 +68,7 @@ export default function Gateways() {
     } else {
       setSelectedGateway(null);
       setFormData({
+        dev_eui: "",
         name: "",
         latitude: "",
         longitude: "",
@@ -78,6 +81,7 @@ export default function Gateways() {
   const handleSubmit = async () => {
     try {
       const payload = {
+        dev_eui: formData.dev_eui || null,
         name: formData.name,
         latitude: parseFloat(formData.latitude),
         longitude: parseFloat(formData.longitude),
@@ -159,7 +163,8 @@ export default function Gateways() {
                 <TableHeader>
                   <TableRow className="border-zinc-800 hover:bg-transparent">
                     <TableHead className="text-zinc-500 font-mono text-xs uppercase">Nume</TableHead>
-                    <TableHead className="text-zinc-500 font-mono text-xs uppercase">ID</TableHead>
+                    <TableHead className="text-zinc-500 font-mono text-xs uppercase">DevEUI</TableHead>
+                    <TableHead className="text-zinc-500 font-mono text-xs uppercase">ID Intern</TableHead>
                     <TableHead className="text-zinc-500 font-mono text-xs uppercase">Latitudine</TableHead>
                     <TableHead className="text-zinc-500 font-mono text-xs uppercase">Longitudine</TableHead>
                     <TableHead className="text-zinc-500 font-mono text-xs uppercase">Status</TableHead>
@@ -174,7 +179,10 @@ export default function Gateways() {
                       data-testid={`gateway-row-${gateway.id}`}
                     >
                       <TableCell className="font-medium text-zinc-200">{gateway.name}</TableCell>
-                      <TableCell className="font-mono text-xs text-zinc-400">{gateway.id}</TableCell>
+                      <TableCell className="font-mono text-xs text-blue-400">
+                        {gateway.dev_eui || <span className="text-zinc-600">—</span>}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-zinc-500">{gateway.id}</TableCell>
                       <TableCell className="font-mono text-sm text-zinc-300">{gateway.latitude.toFixed(6)}</TableCell>
                       <TableCell className="font-mono text-sm text-zinc-300">{gateway.longitude.toFixed(6)}</TableCell>
                       <TableCell>
@@ -226,6 +234,20 @@ export default function Gateways() {
           </DialogHeader>
           
           <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label className="text-zinc-300">DevEUI (Opțional)</Label>
+              <Input
+                value={formData.dev_eui}
+                onChange={(e) => setFormData({ ...formData, dev_eui: e.target.value })}
+                placeholder="AA00BB11CC22DD33"
+                className="bg-zinc-950 border-zinc-800 text-zinc-200 font-mono"
+                data-testid="gateway-deveui-input"
+              />
+              <p className="text-xs text-zinc-500">
+                Identificator unic al gateway-ului din ChirpStack (16 caractere hex)
+              </p>
+            </div>
+
             <div className="space-y-2">
               <Label className="text-zinc-300">Nume</Label>
               <Input

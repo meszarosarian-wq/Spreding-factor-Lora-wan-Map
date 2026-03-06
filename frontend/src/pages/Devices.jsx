@@ -21,17 +21,31 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, Radio, Upload, FileText, Download } from "lucide-react";
+import { Plus, Pencil, Trash2, Radio, Upload, FileText, Download, Info, BarChart3 } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
-// Get SF badge class
-const getSFBadgeClass = (sf) => {
-  if (sf === null || sf === undefined) return "badge-info";
-  if (sf <= 8) return "badge-success";
-  if (sf <= 10) return "badge-warning";
+// Get SF badge class based on AVERAGE
+const getSFBadgeClass = (sfAvg) => {
+  if (sfAvg === null || sfAvg === undefined) return "badge-info";
+  if (sfAvg <= 8.5) return "badge-success";
+  if (sfAvg <= 10.5) return "badge-warning";
   return "badge-danger";
+};
+
+// Get color for SF value
+const getSFColor = (sfAvg) => {
+  if (sfAvg === null || sfAvg === undefined) return "#71717a";
+  if (sfAvg <= 8.5) return "#10b981";
+  if (sfAvg <= 10.5) return "#f59e0b";
+  return "#ef4444";
 };
 
 export default function Devices() {
@@ -40,6 +54,7 @@ export default function Devices() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [bufferDialogOpen, setBufferDialogOpen] = useState(false);
   const [selectedDevice, setSelectedDevice] = useState(null);
   const [formData, setFormData] = useState({
     dev_eui: "",
@@ -130,6 +145,11 @@ export default function Devices() {
     setDeleteDialogOpen(true);
   };
 
+  const openBufferDialog = (device) => {
+    setSelectedDevice(device);
+    setBufferDialogOpen(true);
+  };
+
   // CSV Import Functions
   const handleFileSelect = (event) => {
     const file = event.target.files[0];
@@ -192,7 +212,7 @@ export default function Devices() {
   };
 
   const downloadTemplate = () => {
-    const template = "dev_eui,name,latitude,longitude\n0011223344556677,Sensor Example,44.4268,26.1025";
+    const template = "DevEUI,Name,Latitude,Longitude\na84041000012345,Senzor_Parcare_1,44.4268,26.1025\na84041000012346,Senzor_Parcare_2,44.4270,26.1030";
     const blob = new Blob([template], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -210,6 +230,23 @@ export default function Devices() {
 
   return (
     <div className="space-y-4" data-testid="devices-page">
+      {/* Info Card about SF Buffer */}
+      <Card className="card-base border-blue-600/30 bg-blue-950/10">
+        <CardContent className="p-4">
+          <div className="flex items-start gap-3">
+            <Info className="w-5 h-5 text-blue-500 mt-0.5" />
+            <div>
+              <p className="text-sm font-medium text-blue-400">Sistem de Mediere SF</p>
+              <p className="text-xs text-zinc-400 mt-1">
+                Fiecare dispozitiv păstrează un buffer cu ultimele <strong>10 valori SF</strong>. 
+                Culoarea pe heatmap este calculată din <strong>media aritmetică</strong> a acestor valori, 
+                oferind o imagine mai precisă a calității semnalului în timp.
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       <Card className="card-base">
         <CardHeader>
           <div className="flex items-center justify-between flex-wrap gap-4">
@@ -292,7 +329,20 @@ export default function Devices() {
                     <TableHead className="text-zinc-500 font-mono text-xs uppercase">DevEUI</TableHead>
                     <TableHead className="text-zinc-500 font-mono text-xs uppercase">Latitudine</TableHead>
                     <TableHead className="text-zinc-500 font-mono text-xs uppercase">Longitudine</TableHead>
-                    <TableHead className="text-zinc-500 font-mono text-xs uppercase">Ultimul SF</TableHead>
+                    <TableHead className="text-zinc-500 font-mono text-xs uppercase">
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger className="flex items-center gap-1">
+                            SF Mediu
+                            <Info className="w-3 h-3" />
+                          </TooltipTrigger>
+                          <TooltipContent className="bg-zinc-800 border-zinc-700">
+                            <p className="text-xs">Media ultimelor 10 valori SF</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </TableHead>
+                    <TableHead className="text-zinc-500 font-mono text-xs uppercase">Buffer</TableHead>
                     <TableHead className="text-zinc-500 font-mono text-xs uppercase">Ultima Activitate</TableHead>
                     <TableHead className="text-zinc-500 font-mono text-xs uppercase text-right">Acțiuni</TableHead>
                   </TableRow>
@@ -309,9 +359,24 @@ export default function Devices() {
                       <TableCell className="font-mono text-sm text-zinc-300">{device.latitude.toFixed(6)}</TableCell>
                       <TableCell className="font-mono text-sm text-zinc-300">{device.longitude.toFixed(6)}</TableCell>
                       <TableCell>
-                        <span className={`badge ${getSFBadgeClass(device.last_sf)}`}>
-                          {device.last_sf !== null ? `SF${device.last_sf}` : "N/A"}
+                        <span 
+                          className={`badge ${getSFBadgeClass(device.sf_average)}`}
+                          style={{ borderColor: getSFColor(device.sf_average) + '50' }}
+                        >
+                          {device.sf_average !== null ? device.sf_average.toFixed(1) : "N/A"}
                         </span>
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => openBufferDialog(device)}
+                          className="text-zinc-400 hover:text-white hover:bg-zinc-800 h-7 px-2"
+                          data-testid={`view-buffer-${device.id}`}
+                        >
+                          <BarChart3 className="w-3 h-3 mr-1" />
+                          <span className="text-xs">{device.sf_buffer?.length || 0}/10</span>
+                        </Button>
                       </TableCell>
                       <TableCell className="text-xs text-zinc-400">
                         {formatLastSeen(device.last_seen)}
@@ -365,12 +430,12 @@ export default function Devices() {
               <Input
                 value={formData.dev_eui}
                 onChange={(e) => setFormData({ ...formData, dev_eui: e.target.value })}
-                placeholder="0011223344556677"
+                placeholder="a84041000012345"
                 className="bg-zinc-950 border-zinc-800 text-zinc-200 font-mono"
                 disabled={!!selectedDevice}
                 data-testid="device-deveui-input"
               />
-              <p className="text-xs text-zinc-500">Identificator unic de 16 caractere hexazecimale</p>
+              <p className="text-xs text-zinc-500">Identificator unic de 16 caractere hexazecimale (din ChirpStack)</p>
             </div>
 
             <div className="space-y-2">
@@ -409,6 +474,12 @@ export default function Devices() {
                   data-testid="device-lng-input"
                 />
               </div>
+            </div>
+
+            <div className="p-3 bg-blue-950/20 rounded-sm border border-blue-800/30">
+              <p className="text-xs text-blue-400">
+                <strong>Important:</strong> Dispozitivele LoRaWAN nu au GPS. Introduceți manual coordonatele locației unde este montat senzorul.
+              </p>
             </div>
           </div>
 
@@ -504,11 +575,14 @@ export default function Devices() {
 
             <div className="mt-4 p-3 bg-zinc-950 rounded-sm border border-zinc-800">
               <p className="text-xs text-zinc-400">
-                <strong className="text-zinc-300">Notă:</strong> Fișierul CSV trebuie să conțină coloanele: 
-                <code className="mx-1 px-1 bg-zinc-800 rounded text-emerald-400">dev_eui</code>, 
-                <code className="mx-1 px-1 bg-zinc-800 rounded text-emerald-400">name</code>, 
-                <code className="mx-1 px-1 bg-zinc-800 rounded text-emerald-400">latitude</code>, 
-                <code className="mx-1 px-1 bg-zinc-800 rounded text-emerald-400">longitude</code>
+                <strong className="text-zinc-300">Format acceptat:</strong> CSV cu coloanele 
+                <code className="mx-1 px-1 bg-zinc-800 rounded text-emerald-400">DevEUI</code>, 
+                <code className="mx-1 px-1 bg-zinc-800 rounded text-emerald-400">Name</code>, 
+                <code className="mx-1 px-1 bg-zinc-800 rounded text-emerald-400">Latitude</code>, 
+                <code className="mx-1 px-1 bg-zinc-800 rounded text-emerald-400">Longitude</code>
+              </p>
+              <p className="text-xs text-zinc-500 mt-2">
+                La primirea mesajelor prin webhook, DevEUI-ul va fi asociat automat cu coordonatele GPS introduse.
               </p>
             </div>
           </div>
@@ -542,6 +616,80 @@ export default function Devices() {
                   Importă Dispozitive
                 </>
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* SF Buffer View Dialog */}
+      <Dialog open={bufferDialogOpen} onOpenChange={setBufferDialogOpen}>
+        <DialogContent className="bg-zinc-900 border-zinc-800" data-testid="buffer-dialog">
+          <DialogHeader>
+            <DialogTitle className="text-zinc-100 font-heading flex items-center gap-2">
+              <BarChart3 className="w-5 h-5 text-blue-500" />
+              Buffer SF - {selectedDevice?.name}
+            </DialogTitle>
+            <DialogDescription className="text-zinc-400">
+              Ultimele 10 valori Spreading Factor primite
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="py-4">
+            {selectedDevice?.sf_buffer && selectedDevice.sf_buffer.length > 0 ? (
+              <>
+                <div className="flex gap-2 flex-wrap mb-4">
+                  {selectedDevice.sf_buffer.map((sf, index) => (
+                    <div 
+                      key={index}
+                      className="w-12 h-12 flex items-center justify-center rounded border font-mono text-sm font-bold"
+                      style={{ 
+                        backgroundColor: getSFColor(sf) + '20',
+                        borderColor: getSFColor(sf),
+                        color: getSFColor(sf)
+                      }}
+                    >
+                      {sf}
+                    </div>
+                  ))}
+                </div>
+                
+                <div className="p-3 bg-zinc-950 rounded border border-zinc-800">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-zinc-400">Media calculată:</span>
+                    <span 
+                      className="text-xl font-bold font-mono"
+                      style={{ color: getSFColor(selectedDevice.sf_average) }}
+                    >
+                      {selectedDevice.sf_average?.toFixed(2) || "N/A"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center mt-2">
+                    <span className="text-xs text-zinc-500">Măsurători în buffer:</span>
+                    <span className="text-xs text-zinc-400">{selectedDevice.sf_buffer.length}/10</span>
+                  </div>
+                </div>
+                
+                <p className="text-xs text-zinc-500 mt-4">
+                  Buffer-ul funcționează în mod FIFO (First In, First Out). 
+                  La fiecare uplink nou, cea mai veche valoare este eliminată și se adaugă noua valoare.
+                </p>
+              </>
+            ) : (
+              <div className="text-center py-8 text-zinc-500">
+                <BarChart3 className="w-12 h-12 mx-auto mb-2 opacity-30" />
+                <p>Nu există date în buffer</p>
+                <p className="text-xs mt-1">Buffer-ul se populează la primirea mesajelor uplink</p>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setBufferDialogOpen(false)}
+              className="border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+            >
+              Închide
             </Button>
           </DialogFooter>
         </DialogContent>
