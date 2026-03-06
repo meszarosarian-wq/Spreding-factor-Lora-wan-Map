@@ -355,6 +355,16 @@ class LoRaWANAPITester:
             self.log_test("CSV Import", False, f"Exception: {str(e)}")
             return False
 
+    def test_seed_endpoint(self):
+        """Test seed endpoint"""
+        success, response = self.run_test("Seed Demo Data", "POST", "seed", 200)
+        if success:
+            if 'message' in response:
+                self.log_test("Seed - Response message", True)
+            else:
+                self.log_test("Seed - Response message", False, "Missing message field")
+        return success
+
     def run_all_tests(self):
         """Run all API tests"""
         print("🚀 Starting LoRaWAN API Tests...")
