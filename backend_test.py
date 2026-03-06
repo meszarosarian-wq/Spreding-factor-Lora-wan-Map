@@ -320,15 +320,40 @@ class LoRaWANAPITester:
         
         return success
 
-    def test_seed_endpoint(self):
-        """Test seed endpoint"""
-        success, response = self.run_test("Seed Demo Data", "POST", "seed", 200)
-        if success:
-            if 'message' in response:
-                self.log_test("Seed - Response message", True)
+    def test_csv_import(self):
+        """Test CSV import functionality"""
+        # Create a test CSV content
+        csv_content = "DevEUI,Name,Latitude,Longitude\nAABBCCDDEEFF1111,CSV Test Device 1,44.4400,26.1100\nAABBCCDDEEFF2222,CSV Test Device 2,44.4500,26.1200"
+        
+        # Create a temporary file-like object
+        import io
+        csv_file = io.BytesIO(csv_content.encode('utf-8'))
+        
+        # Test CSV import endpoint
+        files = {'file': ('test_devices.csv', csv_file, 'text/csv')}
+        
+        try:
+            import requests
+            response = requests.post(f"{self.api_url}/devices/import-csv", files=files, timeout=10)
+            
+            success = response.status_code == 200
+            details = f"Status: {response.status_code}"
+            
+            if success:
+                result = response.json()
+                if 'imported' in result and result['imported'] > 0:
+                    self.log_test("CSV Import - Devices imported", True, f"Imported: {result['imported']}")
+                else:
+                    self.log_test("CSV Import - Devices imported", False, "No devices imported")
             else:
-                self.log_test("Seed - Response message", False, "Missing message field")
-        return success
+                details += f" Response: {response.text[:200]}"
+            
+            self.log_test("CSV Import", success, details)
+            return success
+            
+        except Exception as e:
+            self.log_test("CSV Import", False, f"Exception: {str(e)}")
+            return False
 
     def run_all_tests(self):
         """Run all API tests"""
