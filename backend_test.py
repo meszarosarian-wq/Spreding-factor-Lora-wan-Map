@@ -376,6 +376,9 @@ class LoRaWANAPITester:
         # Test webhook
         self.test_chirpstack_webhook()
         
+        # Test CSV import
+        self.test_csv_import()
+        
         # Test seed
         self.test_seed_endpoint()
 
