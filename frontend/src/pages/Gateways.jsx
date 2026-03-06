@@ -22,10 +22,12 @@ import {
 } from "@/components/ui/table";
 import { toast } from "sonner";
 import { Plus, Pencil, Trash2, Router, MapPin } from "lucide-react";
+import { useTheme } from "@/context/ThemeContext";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 export default function Gateways() {
+  const { theme } = useTheme();
   const [gateways, setGateways] = useState([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -38,6 +40,14 @@ export default function Gateways() {
     longitude: "",
     status: "active"
   });
+
+  // Theme classes
+  const cardClass = theme === "dark" ? "bg-zinc-900 border-zinc-800" : "bg-white border-slate-200 shadow-sm";
+  const textPrimary = theme === "dark" ? "text-white" : "text-slate-900";
+  const textSecondary = theme === "dark" ? "text-zinc-400" : "text-slate-600";
+  const textMuted = theme === "dark" ? "text-zinc-500" : "text-slate-500";
+  const inputClass = theme === "dark" ? "bg-zinc-950 border-zinc-800 text-zinc-200" : "bg-white border-slate-200 text-slate-900";
+  const dialogClass = theme === "dark" ? "bg-zinc-900 border-zinc-800" : "bg-white border-slate-200";
 
   const fetchGateways = async () => {
     try {
@@ -67,13 +77,7 @@ export default function Gateways() {
       });
     } else {
       setSelectedGateway(null);
-      setFormData({
-        dev_eui: "",
-        name: "",
-        latitude: "",
-        longitude: "",
-        status: "active"
-      });
+      setFormData({ dev_eui: "", name: "", latitude: "", longitude: "", status: "active" });
     }
     setDialogOpen(true);
   };
@@ -115,19 +119,14 @@ export default function Gateways() {
     }
   };
 
-  const openDeleteDialog = (gateway) => {
-    setSelectedGateway(gateway);
-    setDeleteDialogOpen(true);
-  };
-
   return (
     <div className="space-y-4" data-testid="gateways-page">
-      <Card className="card-base">
+      <Card className={cardClass}>
         <CardHeader>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <Router className="w-6 h-6 text-blue-500" />
-              <CardTitle className="text-xl font-heading font-semibold text-zinc-100">
+              <CardTitle className={`text-xl font-heading font-semibold ${textPrimary}`}>
                 Gateway-uri LoRaWAN
               </CardTitle>
             </div>
@@ -149,11 +148,8 @@ export default function Gateways() {
           ) : gateways.length === 0 ? (
             <div className="empty-state">
               <Router className="empty-state-icon" />
-              <p className="text-zinc-500">Nu există gateway-uri înregistrate</p>
-              <Button 
-                onClick={() => handleOpenDialog()}
-                className="mt-4 bg-blue-600 hover:bg-blue-500"
-              >
+              <p className={textMuted}>Nu există gateway-uri înregistrate</p>
+              <Button onClick={() => handleOpenDialog()} className="mt-4 bg-blue-600 hover:bg-blue-500">
                 Adaugă primul gateway
               </Button>
             </div>
@@ -161,30 +157,29 @@ export default function Gateways() {
             <div className="overflow-x-auto">
               <Table data-testid="gateways-table">
                 <TableHeader>
-                  <TableRow className="border-zinc-800 hover:bg-transparent">
-                    <TableHead className="text-zinc-500 font-mono text-xs uppercase">Nume</TableHead>
-                    <TableHead className="text-zinc-500 font-mono text-xs uppercase">DevEUI</TableHead>
-                    <TableHead className="text-zinc-500 font-mono text-xs uppercase">ID Intern</TableHead>
-                    <TableHead className="text-zinc-500 font-mono text-xs uppercase">Latitudine</TableHead>
-                    <TableHead className="text-zinc-500 font-mono text-xs uppercase">Longitudine</TableHead>
-                    <TableHead className="text-zinc-500 font-mono text-xs uppercase">Status</TableHead>
-                    <TableHead className="text-zinc-500 font-mono text-xs uppercase text-right">Acțiuni</TableHead>
+                  <TableRow className={theme === "dark" ? "border-zinc-800" : "border-slate-200"}>
+                    <TableHead className={`font-mono text-xs uppercase ${textMuted}`}>Nume</TableHead>
+                    <TableHead className={`font-mono text-xs uppercase ${textMuted}`}>DevEUI</TableHead>
+                    <TableHead className={`font-mono text-xs uppercase ${textMuted}`}>ID Intern</TableHead>
+                    <TableHead className={`font-mono text-xs uppercase ${textMuted}`}>Latitudine</TableHead>
+                    <TableHead className={`font-mono text-xs uppercase ${textMuted}`}>Longitudine</TableHead>
+                    <TableHead className={`font-mono text-xs uppercase ${textMuted}`}>Status</TableHead>
+                    <TableHead className={`font-mono text-xs uppercase ${textMuted} text-right`}>Acțiuni</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {gateways.map((gateway) => (
                     <TableRow 
                       key={gateway.id} 
-                      className="border-zinc-800/50 hover:bg-zinc-900/50"
-                      data-testid={`gateway-row-${gateway.id}`}
+                      className={theme === "dark" ? "border-zinc-800/50 hover:bg-zinc-900/50" : "border-slate-100 hover:bg-slate-50"}
                     >
-                      <TableCell className="font-medium text-zinc-200">{gateway.name}</TableCell>
+                      <TableCell className={`font-medium ${textPrimary}`}>{gateway.name}</TableCell>
                       <TableCell className="font-mono text-xs text-blue-400">
-                        {gateway.dev_eui || <span className="text-zinc-600">—</span>}
+                        {gateway.dev_eui || <span className={textMuted}>—</span>}
                       </TableCell>
-                      <TableCell className="font-mono text-xs text-zinc-500">{gateway.id}</TableCell>
-                      <TableCell className="font-mono text-sm text-zinc-300">{gateway.latitude.toFixed(6)}</TableCell>
-                      <TableCell className="font-mono text-sm text-zinc-300">{gateway.longitude.toFixed(6)}</TableCell>
+                      <TableCell className={`font-mono text-xs ${textMuted}`}>{gateway.id}</TableCell>
+                      <TableCell className={`font-mono text-sm ${textSecondary}`}>{gateway.latitude.toFixed(6)}</TableCell>
+                      <TableCell className={`font-mono text-sm ${textSecondary}`}>{gateway.longitude.toFixed(6)}</TableCell>
                       <TableCell>
                         <span className={`badge ${gateway.status === 'active' ? 'badge-success' : 'badge-warning'}`}>
                           {gateway.status === 'active' ? 'Activ' : 'Inactiv'}
@@ -192,22 +187,10 @@ export default function Gateways() {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleOpenDialog(gateway)}
-                            className="text-zinc-400 hover:text-white hover:bg-zinc-800"
-                            data-testid={`edit-gateway-${gateway.id}`}
-                          >
+                          <Button variant="ghost" size="sm" onClick={() => handleOpenDialog(gateway)} className={`${textSecondary} hover:${textPrimary}`}>
                             <Pencil className="w-4 h-4" />
                           </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => openDeleteDialog(gateway)}
-                            className="text-zinc-400 hover:text-red-400 hover:bg-zinc-800"
-                            data-testid={`delete-gateway-${gateway.id}`}
-                          >
+                          <Button variant="ghost" size="sm" onClick={() => { setSelectedGateway(gateway); setDeleteDialogOpen(true); }} className={`${textSecondary} hover:text-red-400`}>
                             <Trash2 className="w-4 h-4" />
                           </Button>
                         </div>
@@ -223,118 +206,94 @@ export default function Gateways() {
 
       {/* Add/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="bg-zinc-900 border-zinc-800" data-testid="gateway-dialog">
+        <DialogContent className={dialogClass}>
           <DialogHeader>
-            <DialogTitle className="text-zinc-100 font-heading">
+            <DialogTitle className={`font-heading ${textPrimary}`}>
               {selectedGateway ? "Editează Gateway" : "Adaugă Gateway"}
             </DialogTitle>
-            <DialogDescription className="text-zinc-400">
+            <DialogDescription className={textSecondary}>
               Introduceți detaliile gateway-ului LoRaWAN
             </DialogDescription>
           </DialogHeader>
           
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label className="text-zinc-300">DevEUI (Opțional)</Label>
+              <Label className={textSecondary}>DevEUI (Opțional)</Label>
               <Input
                 value={formData.dev_eui}
                 onChange={(e) => setFormData({ ...formData, dev_eui: e.target.value })}
                 placeholder="AA00BB11CC22DD33"
-                className="bg-zinc-950 border-zinc-800 text-zinc-200 font-mono"
-                data-testid="gateway-deveui-input"
+                className={`${inputClass} font-mono`}
               />
-              <p className="text-xs text-zinc-500">
-                Identificator unic al gateway-ului din ChirpStack (16 caractere hex)
-              </p>
+              <p className={`text-xs ${textMuted}`}>Identificator unic al gateway-ului din ChirpStack</p>
             </div>
 
             <div className="space-y-2">
-              <Label className="text-zinc-300">Nume</Label>
+              <Label className={textSecondary}>Nume</Label>
               <Input
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 placeholder="Gateway București Nord"
-                className="bg-zinc-950 border-zinc-800 text-zinc-200"
-                data-testid="gateway-name-input"
+                className={inputClass}
               />
             </div>
             
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label className="text-zinc-300">Latitudine</Label>
+                <Label className={textSecondary}>Latitudine</Label>
                 <Input
                   type="number"
                   step="any"
                   value={formData.latitude}
                   onChange={(e) => setFormData({ ...formData, latitude: e.target.value })}
                   placeholder="44.4268"
-                  className="bg-zinc-950 border-zinc-800 text-zinc-200 font-mono"
-                  data-testid="gateway-lat-input"
+                  className={`${inputClass} font-mono`}
                 />
               </div>
               <div className="space-y-2">
-                <Label className="text-zinc-300">Longitudine</Label>
+                <Label className={textSecondary}>Longitudine</Label>
                 <Input
                   type="number"
                   step="any"
                   value={formData.longitude}
                   onChange={(e) => setFormData({ ...formData, longitude: e.target.value })}
                   placeholder="26.1025"
-                  className="bg-zinc-950 border-zinc-800 text-zinc-200 font-mono"
-                  data-testid="gateway-lng-input"
+                  className={`${inputClass} font-mono`}
                 />
               </div>
             </div>
 
-            <div className="flex items-center gap-2 p-3 bg-zinc-950 rounded-sm border border-zinc-800">
+            <div className={`flex items-center gap-2 p-3 rounded-sm border ${theme === "dark" ? "bg-zinc-950 border-zinc-800" : "bg-slate-50 border-slate-200"}`}>
               <MapPin className="w-4 h-4 text-blue-500" />
-              <span className="text-xs text-zinc-400">
-                Coordonatele GPS pot fi obținute din Google Maps sau alte servicii de hartă
-              </span>
+              <span className={`text-xs ${textMuted}`}>Coordonatele GPS pot fi obținute din Google Maps</span>
             </div>
           </div>
 
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setDialogOpen(false)}
-              className="border-zinc-700 text-zinc-300 hover:bg-zinc-800"
-            >
+            <Button variant="outline" onClick={() => setDialogOpen(false)} className={theme === "dark" ? "border-zinc-700 text-zinc-300" : "border-slate-200"}>
               Anulează
             </Button>
-            <Button
-              onClick={handleSubmit}
-              className="bg-blue-600 hover:bg-blue-500 text-white"
-              data-testid="save-gateway-btn"
-            >
+            <Button onClick={handleSubmit} className="bg-blue-600 hover:bg-blue-500 text-white">
               {selectedGateway ? "Salvează" : "Adaugă"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirmation Dialog */}
+      {/* Delete Dialog */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DialogContent className="bg-zinc-900 border-zinc-800" data-testid="delete-gateway-dialog">
+        <DialogContent className={dialogClass}>
           <DialogHeader>
-            <DialogTitle className="text-zinc-100 font-heading">Confirmare Ștergere</DialogTitle>
-            <DialogDescription className="text-zinc-400">
-              Sigur doriți să ștergeți gateway-ul "{selectedGateway?.name}"? Această acțiune nu poate fi anulată.
+            <DialogTitle className={`font-heading ${textPrimary}`}>Confirmare Ștergere</DialogTitle>
+            <DialogDescription className={textSecondary}>
+              Sigur doriți să ștergeți gateway-ul "{selectedGateway?.name}"?
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setDeleteDialogOpen(false)}
-              className="border-zinc-700 text-zinc-300 hover:bg-zinc-800"
-            >
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)} className={theme === "dark" ? "border-zinc-700 text-zinc-300" : "border-slate-200"}>
               Anulează
             </Button>
-            <Button
-              onClick={handleDelete}
-              className="bg-red-600 hover:bg-red-500 text-white"
-              data-testid="confirm-delete-gateway"
-            >
+            <Button onClick={handleDelete} className="bg-red-600 hover:bg-red-500 text-white">
               Șterge
             </Button>
           </DialogFooter>
