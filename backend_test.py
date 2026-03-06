@@ -119,11 +119,21 @@ class LoRaWANAPITester:
         return success
 
     def test_devices_crud(self):
-        """Test device CRUD operations"""
+        """Test device CRUD operations with V1.1 SF buffer features"""
         # Get initial devices
         success, initial_devices = self.run_test("Get Devices", "GET", "devices", 200)
         if not success:
             return False
+
+        # Check if devices have SF buffer fields
+        if len(initial_devices) > 0:
+            device = initial_devices[0]
+            sf_fields = ['sf_buffer', 'sf_average']
+            for field in sf_fields:
+                if field in device:
+                    self.log_test(f"Device - {field} field present", True)
+                else:
+                    self.log_test(f"Device - {field} field present", False, f"Missing {field}")
 
         # Create a test device
         test_device = {
@@ -141,6 +151,15 @@ class LoRaWANAPITester:
         if not device_id:
             self.log_test("Device Creation - ID", False, "No ID returned")
             return False
+
+        # Check if created device has SF buffer initialized
+        if 'sf_buffer' in created_device:
+            if isinstance(created_device['sf_buffer'], list):
+                self.log_test("Device Creation - SF buffer initialized", True)
+            else:
+                self.log_test("Device Creation - SF buffer initialized", False, "SF buffer not a list")
+        else:
+            self.log_test("Device Creation - SF buffer field", False, "Missing sf_buffer field")
 
         # Get specific device
         success, _ = self.run_test("Get Device by ID", "GET", f"devices/{device_id}", 200)
