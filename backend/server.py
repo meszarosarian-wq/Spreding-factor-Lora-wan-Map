@@ -26,11 +26,15 @@ app = FastAPI()
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
+# Constants
+SF_BUFFER_SIZE = 10  # Number of SF values to keep for averaging
+
 # ==================== MODELS ====================
 
 class Gateway(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    dev_eui: Optional[str] = None  # Gateway DevEUI for identification
     name: str
     latitude: float
     longitude: float
@@ -38,6 +42,7 @@ class Gateway(BaseModel):
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 class GatewayCreate(BaseModel):
+    dev_eui: Optional[str] = None
     name: str
     latitude: float
     longitude: float
@@ -52,6 +57,8 @@ class Device(BaseModel):
     longitude: float
     last_seen: Optional[str] = None
     last_sf: Optional[int] = None
+    sf_buffer: List[int] = Field(default_factory=list)  # Buffer of last 10 SF values
+    sf_average: Optional[float] = None  # Calculated average of SF buffer
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 class DeviceCreate(BaseModel):
@@ -72,15 +79,30 @@ class UplinkLog(BaseModel):
     spreading_factor: int
     timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
-class ChirpStackWebhook(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    
 class StatsResponse(BaseModel):
     total_gateways: int
     total_devices: int
     total_uplinks: int
     uplinks_today: int
     sf_distribution: dict
+
+# ==================== HELPER FUNCTIONS ====================
+
+def calculate_sf_average(sf_buffer: List[int]) -> Optional[float]:
+    """Calculate average SF from buffer"""
+    if not sf_buffer:
+        return None
+    return round(sum(sf_buffer) / len(sf_buffer), 2)
+
+def get_sf_color_category(sf_avg: Optional[float]) -> str:
+    """Get color category based on average SF"""
+    if sf_avg is None:
+        return "unknown"
+    if sf_avg <= 8.5:
+        return "good"  # Green
+    if sf_avg <= 10.5:
+        return "medium"  # Orange
+    return "bad"  # Red
 
 # ==================== GATEWAY ENDPOINTS ====================
 
@@ -98,6 +120,12 @@ async def get_gateway(gateway_id: str):
 
 @api_router.post("/gateways", response_model=Gateway)
 async def create_gateway(data: GatewayCreate):
+    # Check if dev_eui already exists (if provided)
+    if data.dev_eui:
+        existing = await db.gateways.find_one({"dev_eui": data.dev_eui})
+        if existing:
+            raise HTTPException(status_code=400, detail="Gateway with this DevEUI already exists")
+    
     gateway = Gateway(**data.model_dump())
     doc = gateway.model_dump()
     await db.gateways.insert_one(doc)
@@ -108,6 +136,12 @@ async def update_gateway(gateway_id: str, data: GatewayCreate):
     existing = await db.gateways.find_one({"id": gateway_id})
     if not existing:
         raise HTTPException(status_code=404, detail="Gateway not found")
+    
+    # Check if dev_eui is being changed to one that already exists
+    if data.dev_eui:
+        duplicate = await db.gateways.find_one({"dev_eui": data.dev_eui, "id": {"$ne": gateway_id}})
+        if duplicate:
+            raise HTTPException(status_code=400, detail="Another gateway with this DevEUI already exists")
     
     update_data = data.model_dump()
     await db.gateways.update_one({"id": gateway_id}, {"$set": update_data})
@@ -123,19 +157,29 @@ async def delete_gateway(gateway_id: str):
 
 # ==================== DEVICE ENDPOINTS ====================
 
-@api_router.get("/devices", response_model=List[Device])
+@api_router.get("/devices")
 async def get_devices():
     devices = await db.devices.find({}, {"_id": 0}).to_list(1000)
+    # Ensure sf_buffer and sf_average are present
+    for device in devices:
+        if "sf_buffer" not in device:
+            device["sf_buffer"] = []
+        if "sf_average" not in device:
+            device["sf_average"] = calculate_sf_average(device.get("sf_buffer", []))
     return devices
 
-@api_router.get("/devices/{device_id}", response_model=Device)
+@api_router.get("/devices/{device_id}")
 async def get_device(device_id: str):
     device = await db.devices.find_one({"id": device_id}, {"_id": 0})
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
+    if "sf_buffer" not in device:
+        device["sf_buffer"] = []
+    if "sf_average" not in device:
+        device["sf_average"] = calculate_sf_average(device.get("sf_buffer", []))
     return device
 
-@api_router.post("/devices", response_model=Device)
+@api_router.post("/devices")
 async def create_device(data: DeviceCreate):
     # Check if dev_eui already exists
     existing = await db.devices.find_one({"dev_eui": data.dev_eui})
@@ -147,7 +191,7 @@ async def create_device(data: DeviceCreate):
     await db.devices.insert_one(doc)
     return device
 
-@api_router.put("/devices/{device_id}", response_model=Device)
+@api_router.put("/devices/{device_id}")
 async def update_device(device_id: str, data: DeviceCreate):
     existing = await db.devices.find_one({"id": device_id})
     if not existing:
@@ -212,7 +256,7 @@ async def import_devices_csv(file: UploadFile = File(...)):
     return {
         "imported": imported,
         "skipped": skipped,
-        "errors": errors[:10]  # Return only first 10 errors
+        "errors": errors[:10]
     }
 
 # ==================== UPLINK LOG ENDPOINTS ====================
@@ -247,40 +291,23 @@ async def get_uplinks(
 async def chirpstack_webhook(payload: dict):
     """
     Process ChirpStack UplinkEvent webhook
-    Expected payload structure:
-    {
-        "devEui": "0102030405060708",
-        "txInfo": {
-            "dr": 5,  # DataRate index
-            "frequency": 868100000
-        },
-        "rxInfo": [
-            {
-                "gatewayId": "gateway-id",
-                "rssi": -80,
-                "snr": 7.5
-            }
-        ]
-    }
+    Updates device's SF buffer (FIFO, max 10 values) and recalculates average
     """
     try:
         dev_eui = payload.get("devEui") or payload.get("deviceInfo", {}).get("devEui", "")
         
         # Extract spreading factor from txInfo
         tx_info = payload.get("txInfo", {})
-        
-        # Try different ways to get spreading factor
         spreading_factor = None
         
         # Method 1: Direct spreadingFactor field
         if "loraModulationInfo" in tx_info:
             spreading_factor = tx_info["loraModulationInfo"].get("spreadingFactor")
         
-        # Method 2: From dr (DataRate) - typical mapping for EU868
+        # Method 2: From dr (DataRate) - EU868 mapping
         if spreading_factor is None:
             dr = tx_info.get("dr")
             if dr is not None:
-                # EU868 DataRate mapping: DR0=SF12, DR1=SF11, DR2=SF10, DR3=SF9, DR4=SF8, DR5=SF7
                 sf_mapping = {0: 12, 1: 11, 2: 10, 3: 9, 4: 8, 5: 7}
                 spreading_factor = sf_mapping.get(dr, 7)
         
@@ -290,24 +317,24 @@ async def chirpstack_webhook(payload: dict):
         
         # Extract RSSI and SNR from rxInfo
         rx_info_list = payload.get("rxInfo", [])
-        
         if not rx_info_list:
-            # Use default values if no rxInfo
             rx_info_list = [{"gatewayId": "", "rssi": -100, "snr": 0}]
         
         # Find the device in our database
         device = await db.devices.find_one({"dev_eui": dev_eui})
         device_name = device.get("name") if device else None
         
-        # Create uplink logs for each gateway that received the message
+        # Create uplink logs for each gateway
         created_logs = []
         for rx_info in rx_info_list:
             gateway_id_raw = rx_info.get("gatewayId", "")
             rssi = rx_info.get("rssi", -100)
             snr = rx_info.get("snr", 0)
             
-            # Find gateway name
-            gateway = await db.gateways.find_one({"id": gateway_id_raw})
+            # Try to find gateway by dev_eui first, then by id
+            gateway = await db.gateways.find_one({"dev_eui": gateway_id_raw})
+            if not gateway:
+                gateway = await db.gateways.find_one({"id": gateway_id_raw})
             gateway_name = gateway.get("name") if gateway else None
             
             uplink = UplinkLog(
@@ -323,20 +350,35 @@ async def chirpstack_webhook(payload: dict):
             await db.uplinks.insert_one(uplink.model_dump())
             created_logs.append(uplink)
         
-        # Update device's last_seen and last_sf
+        # Update device's SF buffer (FIFO) and recalculate average
         if device:
+            sf_buffer = device.get("sf_buffer", [])
+            
+            # Add new SF value to buffer
+            sf_buffer.append(spreading_factor)
+            
+            # Keep only last SF_BUFFER_SIZE values (FIFO)
+            if len(sf_buffer) > SF_BUFFER_SIZE:
+                sf_buffer = sf_buffer[-SF_BUFFER_SIZE:]
+            
+            # Calculate new average
+            sf_average = calculate_sf_average(sf_buffer)
+            
             await db.devices.update_one(
                 {"dev_eui": dev_eui},
                 {"$set": {
                     "last_seen": datetime.now(timezone.utc).isoformat(),
-                    "last_sf": spreading_factor
+                    "last_sf": spreading_factor,
+                    "sf_buffer": sf_buffer,
+                    "sf_average": sf_average
                 }}
             )
         
         return {
             "status": "success",
             "message": f"Processed uplink from {dev_eui}",
-            "logs_created": len(created_logs)
+            "logs_created": len(created_logs),
+            "sf_buffer_size": len(device.get("sf_buffer", [])) + 1 if device else 0
         }
         
     except Exception as e:
@@ -351,11 +393,9 @@ async def get_stats():
     total_devices = await db.devices.count_documents({})
     total_uplinks = await db.uplinks.count_documents({})
     
-    # Count uplinks today
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
     uplinks_today = await db.uplinks.count_documents({"timestamp": {"$gte": today_start}})
     
-    # SF distribution
     pipeline = [
         {"$group": {"_id": "$spreading_factor", "count": {"$sum": 1}}}
     ]
@@ -379,12 +419,14 @@ async def get_heatmap_data(
     end_date: Optional[str] = None
 ):
     """
-    Get device locations with their latest SF values for heatmap visualization
+    Get device locations with their average SF values for heatmap visualization.
+    Uses sf_average (from buffer of last 10 values) for coloring:
+    - 7.0-8.5: Green (Good)
+    - 8.6-10.5: Orange (Medium)
+    - 10.6+: Red (Bad)
     """
-    # Get all devices
     devices = await db.devices.find({}, {"_id": 0}).to_list(1000)
     
-    # Build uplink query for filtering
     uplink_query = {}
     if gateway_id:
         uplink_query["gateway_id"] = gateway_id
@@ -398,7 +440,7 @@ async def get_heatmap_data(
     heatmap_points = []
     
     for device in devices:
-        # Get latest uplink for this device with filters
+        # Get latest uplink for additional data (RSSI, SNR)
         device_query = {**uplink_query, "dev_eui": device["dev_eui"]}
         latest_uplink = await db.uplinks.find_one(
             device_query,
@@ -406,22 +448,34 @@ async def get_heatmap_data(
             sort=[("timestamp", -1)]
         )
         
-        # Determine SF value
-        if latest_uplink:
-            sf = latest_uplink.get("spreading_factor", device.get("last_sf"))
-        else:
-            sf = device.get("last_sf")
+        # Get SF average from device (calculated from buffer)
+        sf_buffer = device.get("sf_buffer", [])
+        sf_average = device.get("sf_average")
         
-        # Skip if no SF data and we have filters applied
-        if sf is None and (gateway_id or start_date or end_date):
+        # If no sf_average stored, calculate from buffer or use last_sf
+        if sf_average is None:
+            if sf_buffer:
+                sf_average = calculate_sf_average(sf_buffer)
+            elif device.get("last_sf"):
+                sf_average = float(device.get("last_sf"))
+        
+        # Skip if no SF data and filters are applied
+        if sf_average is None and (gateway_id or start_date or end_date):
             continue
+        
+        # Determine color category
+        color_category = get_sf_color_category(sf_average)
         
         heatmap_points.append({
             "dev_eui": device["dev_eui"],
             "name": device["name"],
             "latitude": device["latitude"],
             "longitude": device["longitude"],
-            "spreading_factor": sf,
+            "spreading_factor": device.get("last_sf"),
+            "sf_average": sf_average,
+            "sf_buffer": sf_buffer,
+            "sf_buffer_size": len(sf_buffer),
+            "color_category": color_category,
             "last_seen": device.get("last_seen"),
             "rssi": latest_uplink.get("rssi") if latest_uplink else None,
             "snr": latest_uplink.get("snr") if latest_uplink else None
@@ -433,18 +487,18 @@ async def get_heatmap_data(
 
 @api_router.post("/seed")
 async def seed_demo_data():
-    """Seed demo data: 1 gateway and 5 devices in Bucharest area"""
+    """Seed demo data: 1 gateway and 5 devices with SF buffers"""
     
-    # Check if data already exists
     existing_gateways = await db.gateways.count_documents({})
     existing_devices = await db.devices.count_documents({})
     
     if existing_gateways > 0 or existing_devices > 0:
         return {"message": "Demo data already exists", "gateways": existing_gateways, "devices": existing_devices}
     
-    # Create demo gateway - Bucharest center
+    # Create demo gateway with DevEUI
     gateway = Gateway(
         id="gw-bucuresti-centru",
+        dev_eui="AA00BB11CC22DD33",
         name="Gateway București Centru",
         latitude=44.4268,
         longitude=26.1025,
@@ -452,49 +506,68 @@ async def seed_demo_data():
     )
     await db.gateways.insert_one(gateway.model_dump())
     
-    # Create 5 demo devices around Bucharest with different SF scenarios
+    # Create 5 demo devices with SF buffers
     demo_devices = [
-        Device(
-            dev_eui="0011223344556601",
-            name="Sensor Piața Universității",
-            latitude=44.4353,
-            longitude=26.1027,
-            last_sf=7  # Good coverage - close to gateway
-        ),
-        Device(
-            dev_eui="0011223344556602",
-            name="Sensor Parcul Herăstrău",
-            latitude=44.4711,
-            longitude=26.0762,
-            last_sf=8  # Good coverage
-        ),
-        Device(
-            dev_eui="0011223344556603",
-            name="Sensor Gara de Nord",
-            latitude=44.4479,
-            longitude=26.0694,
-            last_sf=9  # Medium coverage
-        ),
-        Device(
-            dev_eui="0011223344556604",
-            name="Sensor Baneasa",
-            latitude=44.5013,
-            longitude=26.0827,
-            last_sf=10  # Medium coverage - farther
-        ),
-        Device(
-            dev_eui="0011223344556605",
-            name="Sensor Măgurele",
-            latitude=44.3479,
-            longitude=26.0299,
-            last_sf=12  # Poor coverage - far from gateway
-        ),
+        {
+            "dev_eui": "0011223344556601",
+            "name": "Sensor Piața Universității",
+            "latitude": 44.4353,
+            "longitude": 26.1027,
+            "last_sf": 7,
+            "sf_buffer": [7, 7, 8, 7, 7, 8, 7, 7, 7, 8],  # Avg ~7.3
+            "sf_average": 7.3
+        },
+        {
+            "dev_eui": "0011223344556602",
+            "name": "Sensor Parcul Herăstrău",
+            "latitude": 44.4711,
+            "longitude": 26.0762,
+            "last_sf": 8,
+            "sf_buffer": [8, 8, 8, 9, 8, 8, 7, 8, 8, 8],  # Avg ~8.0
+            "sf_average": 8.0
+        },
+        {
+            "dev_eui": "0011223344556603",
+            "name": "Sensor Gara de Nord",
+            "latitude": 44.4479,
+            "longitude": 26.0694,
+            "last_sf": 9,
+            "sf_buffer": [9, 9, 10, 9, 9, 10, 9, 9, 10, 9],  # Avg ~9.3
+            "sf_average": 9.3
+        },
+        {
+            "dev_eui": "0011223344556604",
+            "name": "Sensor Baneasa",
+            "latitude": 44.5013,
+            "longitude": 26.0827,
+            "last_sf": 10,
+            "sf_buffer": [10, 10, 10, 11, 10, 10, 9, 10, 10, 10],  # Avg ~10.0
+            "sf_average": 10.0
+        },
+        {
+            "dev_eui": "0011223344556605",
+            "name": "Sensor Măgurele",
+            "latitude": 44.3479,
+            "longitude": 26.0299,
+            "last_sf": 12,
+            "sf_buffer": [11, 12, 12, 11, 12, 12, 11, 12, 12, 12],  # Avg ~11.7
+            "sf_average": 11.7
+        },
     ]
     
-    for device in demo_devices:
+    for dev_data in demo_devices:
+        device = Device(
+            dev_eui=dev_data["dev_eui"],
+            name=dev_data["name"],
+            latitude=dev_data["latitude"],
+            longitude=dev_data["longitude"],
+            last_sf=dev_data["last_sf"],
+            sf_buffer=dev_data["sf_buffer"],
+            sf_average=dev_data["sf_average"]
+        )
         await db.devices.insert_one(device.model_dump())
     
-    # Create some demo uplink logs
+    # Create demo uplink logs
     demo_uplinks = [
         UplinkLog(
             dev_eui="0011223344556601",
@@ -557,7 +630,7 @@ async def seed_demo_data():
 
 @api_router.get("/")
 async def root():
-    return {"message": "LoRaWAN Coverage Monitor API", "version": "1.0.0"}
+    return {"message": "LoRaWAN Coverage Monitor API", "version": "1.1.0"}
 
 # Include the router in the main app
 app.include_router(api_router)
