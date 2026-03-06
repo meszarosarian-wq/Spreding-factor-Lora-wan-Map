@@ -75,21 +75,30 @@ class LoRaWANAPITester:
         return success
 
     def test_gateways_crud(self):
-        """Test gateway CRUD operations"""
+        """Test gateway CRUD operations with V1.1 DevEUI features"""
         # Get initial gateways
         success, initial_gateways = self.run_test("Get Gateways", "GET", "gateways", 200)
         if not success:
             return False
 
-        # Create a test gateway
+        # Check if gateways have DevEUI field
+        if len(initial_gateways) > 0:
+            gateway = initial_gateways[0]
+            if 'dev_eui' in gateway:
+                self.log_test("Gateway - DevEUI field present", True)
+            else:
+                self.log_test("Gateway - DevEUI field present", False, "Missing dev_eui field")
+
+        # Create a test gateway with DevEUI
         test_gateway = {
+            "dev_eui": "AA00BB11CC22DD44",
             "name": "Test Gateway API",
             "latitude": 44.4500,
             "longitude": 26.1100,
             "status": "active"
         }
         
-        success, created_gateway = self.run_test("Create Gateway", "POST", "gateways", 200, test_gateway)
+        success, created_gateway = self.run_test("Create Gateway with DevEUI", "POST", "gateways", 200, test_gateway)
         if not success:
             return False
 
@@ -98,6 +107,12 @@ class LoRaWANAPITester:
             self.log_test("Gateway Creation - ID", False, "No ID returned")
             return False
 
+        # Check if created gateway has DevEUI
+        if 'dev_eui' in created_gateway and created_gateway['dev_eui'] == "AA00BB11CC22DD44":
+            self.log_test("Gateway Creation - DevEUI stored", True)
+        else:
+            self.log_test("Gateway Creation - DevEUI stored", False, "DevEUI not stored correctly")
+
         # Get specific gateway
         success, _ = self.run_test("Get Gateway by ID", "GET", f"gateways/{gateway_id}", 200)
         if not success:
@@ -105,6 +120,7 @@ class LoRaWANAPITester:
 
         # Update gateway
         updated_data = {
+            "dev_eui": "AA00BB11CC22DD55",
             "name": "Updated Test Gateway",
             "latitude": 44.4600,
             "longitude": 26.1200,
@@ -113,6 +129,18 @@ class LoRaWANAPITester:
         success, _ = self.run_test("Update Gateway", "PUT", f"gateways/{gateway_id}", 200, updated_data)
         if not success:
             return False
+
+        # Test duplicate DevEUI (should fail)
+        duplicate_gateway = {
+            "dev_eui": "AA00BB11CC22DD55",  # Same DevEUI as updated
+            "name": "Duplicate Gateway",
+            "latitude": 44.4700,
+            "longitude": 26.1300,
+            "status": "active"
+        }
+        success, _ = self.run_test("Create Duplicate Gateway DevEUI (should fail)", "POST", "gateways", 400, duplicate_gateway)
+        if not success:
+            self.log_test("Duplicate Gateway DevEUI Prevention", False, "Should have returned 400 for duplicate DevEUI")
 
         # Delete gateway
         success, _ = self.run_test("Delete Gateway", "DELETE", f"gateways/{gateway_id}", 200)
