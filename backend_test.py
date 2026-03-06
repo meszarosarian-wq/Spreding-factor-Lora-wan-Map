@@ -189,18 +189,28 @@ class LoRaWANAPITester:
         return success
 
     def test_heatmap_endpoint(self):
-        """Test heatmap endpoint"""
+        """Test heatmap endpoint with V1.1 SF buffer features"""
         success, heatmap_data = self.run_test("Get Heatmap Data", "GET", "heatmap", 200)
         if success and isinstance(heatmap_data, list):
             self.log_test("Heatmap - Response is list", True)
             if len(heatmap_data) > 0:
                 point = heatmap_data[0]
-                required_fields = ['dev_eui', 'name', 'latitude', 'longitude']
+                required_fields = ['dev_eui', 'name', 'latitude', 'longitude', 'sf_average', 'sf_buffer_size']
                 for field in required_fields:
                     if field not in point:
                         self.log_test(f"Heatmap - {field} field", False, f"Missing field: {field}")
                         return False
-                self.log_test("Heatmap - All fields present", True)
+                self.log_test("Heatmap - All V1.1 fields present", True)
+                
+                # Test SF buffer specific fields
+                if 'sf_buffer' in point and isinstance(point['sf_buffer'], list):
+                    self.log_test("Heatmap - SF buffer is list", True)
+                    if len(point['sf_buffer']) <= 10:
+                        self.log_test("Heatmap - SF buffer size <= 10", True)
+                    else:
+                        self.log_test("Heatmap - SF buffer size <= 10", False, f"Buffer size: {len(point['sf_buffer'])}")
+                else:
+                    self.log_test("Heatmap - SF buffer field", False, "Missing or invalid sf_buffer")
         return success
 
     def test_chirpstack_webhook(self):
