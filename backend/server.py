@@ -325,6 +325,7 @@ async def chirpstack_webhook(payload: dict):
         # Find the device in our database
         device = await db.devices.find_one({"dev_eui": dev_eui})
         device_name = device.get("name") if device else None
+        device_registered = device is not None
         
         # Create uplink logs for each gateway
         created_logs = []
@@ -338,12 +339,15 @@ async def chirpstack_webhook(payload: dict):
             if not gateway:
                 gateway = await db.gateways.find_one({"id": gateway_id_raw})
             gateway_name = gateway.get("name") if gateway else None
+            gateway_registered = gateway is not None
             
             uplink = UplinkLog(
                 dev_eui=dev_eui,
                 device_name=device_name,
+                device_registered=device_registered,
                 gateway_id=gateway_id_raw,
                 gateway_name=gateway_name,
+                gateway_registered=gateway_registered,
                 rssi=int(rssi),
                 snr=float(snr),
                 spreading_factor=spreading_factor
