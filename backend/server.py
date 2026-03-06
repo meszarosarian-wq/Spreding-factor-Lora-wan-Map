@@ -287,6 +287,71 @@ async def get_uplinks(
     uplinks = await db.uplinks.find(query, {"_id": 0}).sort("timestamp", -1).to_list(limit)
     return uplinks
 
+# ==================== UNREGISTERED DEVICES ENDPOINT ====================
+
+@api_router.get("/unregistered-devices")
+async def get_unregistered_devices():
+    """
+    Get list of DevEUIs that have sent data but are not registered in the devices collection
+    """
+    # Get all unique dev_euis from uplinks where device_registered is False
+    pipeline = [
+        {"$match": {"device_registered": False}},
+        {"$group": {
+            "_id": "$dev_eui",
+            "last_seen": {"$max": "$timestamp"},
+            "last_sf": {"$first": "$spreading_factor"},
+            "last_rssi": {"$first": "$rssi"},
+            "last_snr": {"$first": "$snr"},
+            "message_count": {"$sum": 1}
+        }},
+        {"$sort": {"last_seen": -1}}
+    ]
+    
+    unregistered = await db.uplinks.aggregate(pipeline).to_list(100)
+    
+    result = []
+    for item in unregistered:
+        # Double check it's not in devices collection
+        existing = await db.devices.find_one({"dev_eui": item["_id"]})
+        if not existing:
+            result.append({
+                "dev_eui": item["_id"],
+                "last_seen": item["last_seen"],
+                "last_sf": item["last_sf"],
+                "last_rssi": item["last_rssi"],
+                "last_snr": item["last_snr"],
+                "message_count": item["message_count"]
+            })
+    
+    return result
+
+@api_router.post("/devices/quick-register")
+async def quick_register_device(dev_eui: str, name: str, latitude: float = 0.0, longitude: float = 0.0):
+    """
+    Quick register a device from the Live Feed
+    """
+    # Check if already exists
+    existing = await db.devices.find_one({"dev_eui": dev_eui})
+    if existing:
+        raise HTTPException(status_code=400, detail="Device with this DevEUI already exists")
+    
+    device = Device(
+        dev_eui=dev_eui,
+        name=name,
+        latitude=latitude,
+        longitude=longitude
+    )
+    await db.devices.insert_one(device.model_dump())
+    
+    # Update all existing uplinks for this device
+    await db.uplinks.update_many(
+        {"dev_eui": dev_eui},
+        {"$set": {"device_name": name, "device_registered": True}}
+    )
+    
+    return device
+
 # ==================== CHIRPSTACK WEBHOOK ====================
 
 @api_router.post("/chirpstack/webhook")
