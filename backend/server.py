@@ -183,12 +183,20 @@ async def get_device(device_id: str):
 
 @api_router.post("/devices")
 async def create_device(data: DeviceCreate):
+    # Normalize DevEUI to uppercase for consistent matching
+    normalized_dev_eui = data.dev_eui.upper().strip()
+    
     # Check if dev_eui already exists
-    existing = await db.devices.find_one({"dev_eui": data.dev_eui})
+    existing = await db.devices.find_one({"dev_eui": normalized_dev_eui})
     if existing:
         raise HTTPException(status_code=400, detail="Device with this DevEUI already exists")
     
-    device = Device(**data.model_dump())
+    device = Device(
+        dev_eui=normalized_dev_eui,
+        name=data.name,
+        latitude=data.latitude,
+        longitude=data.longitude
+    )
     doc = device.model_dump()
     await db.devices.insert_one(doc)
     return device
