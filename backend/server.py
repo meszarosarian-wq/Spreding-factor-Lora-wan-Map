@@ -374,10 +374,12 @@ async def chirpstack_webhook(payload: dict):
     """
     Process ChirpStack UplinkEvent webhook
     Updates device's SF buffer (FIFO, max 10 values) and recalculates average
-    DevEUI is normalized to UPPERCASE for consistent matching
+    Matches device by DevEUI (primary) or by Name (secondary)
     """
     try:
         raw_dev_eui = payload.get("devEui") or payload.get("deviceInfo", {}).get("devEui", "")
+        device_name_from_payload = payload.get("deviceName") or payload.get("deviceInfo", {}).get("deviceName", "")
+        
         # NORMALIZE DevEUI to UPPERCASE for consistent matching
         dev_eui = raw_dev_eui.upper().strip()
         
@@ -405,9 +407,24 @@ async def chirpstack_webhook(payload: dict):
         if not rx_info_list:
             rx_info_list = [{"gatewayId": "", "rssi": -100, "snr": 0}]
         
-        # Find the device in our database (using normalized uppercase DevEUI)
+        # Find the device in our database:
+        # 1. First try by DevEUI (normalized uppercase)
         device = await db.devices.find_one({"dev_eui": dev_eui})
-        device_name = device.get("name") if device else None
+        
+        # 2. If not found by DevEUI, try by name (case-insensitive)
+        if not device and device_name_from_payload:
+            device = await db.devices.find_one({
+                "name": {"$regex": f"^{device_name_from_payload}$", "$options": "i"}
+            })
+            # If found by name, update the device's DevEUI for future matching
+            if device:
+                await db.devices.update_one(
+                    {"id": device["id"]},
+                    {"$set": {"dev_eui": dev_eui}}
+                )
+                logger.info(f"Updated device {device['name']} with DevEUI {dev_eui}")
+        
+        device_name = device.get("name") if device else device_name_from_payload or None
         device_registered = device is not None
         
         # Create uplink logs for each gateway
