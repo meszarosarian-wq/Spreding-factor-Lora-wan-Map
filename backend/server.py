@@ -244,14 +244,17 @@ async def import_devices_csv(file: UploadFile = File(...)):
                 skipped += 1
                 continue
             
+            # Normalize DevEUI to uppercase for consistent matching
+            normalized_dev_eui = dev_eui.upper().strip()
+            
             # Check if device already exists
-            existing = await db.devices.find_one({"dev_eui": dev_eui})
+            existing = await db.devices.find_one({"dev_eui": normalized_dev_eui})
             if existing:
                 skipped += 1
                 continue
             
             device = Device(
-                dev_eui=dev_eui,
+                dev_eui=normalized_dev_eui,
                 name=name,
                 latitude=float(latitude),
                 longitude=float(longitude)
