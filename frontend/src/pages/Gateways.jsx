@@ -22,7 +22,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, Router, MapPin, Search, ArrowUpDown, ArrowUp, ArrowDown, X } from "lucide-react";
+import { Plus, Pencil, Trash2, Router, MapPin, Search, ArrowUpDown, ArrowUp, ArrowDown, X, Download, FileSpreadsheet } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -140,6 +140,38 @@ export default function Gateways() {
   };
 
   const hasActiveFilters = searchTerm || filterStatus !== "all" || sortField !== "name";
+
+  // Export gateways to CSV
+  const exportGatewaysToCSV = () => {
+    if (filteredGateways.length === 0) {
+      toast.error("Nu există date pentru export");
+      return;
+    }
+    
+    const headers = ["ID", "DevEUI", "Nume", "Latitudine", "Longitudine", "Status"];
+    const rows = filteredGateways.map(g => [
+      g.id,
+      g.dev_eui || "",
+      g.name,
+      g.latitude,
+      g.longitude,
+      g.status
+    ]);
+    
+    const csvContent = [
+      headers.join(","),
+      ...rows.map(row => row.map(cell => `"${cell}"`).join(","))
+    ].join("\n");
+    
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `gateways_export_${new Date().toISOString().split("T")[0]}.csv`;
+    a.click();
+    window.URL.revokeObjectURL(url);
+    toast.success(`${filteredGateways.length} gateway-uri exportate`);
+  };
 
   const handleOpenDialog = (gateway = null) => {
     if (gateway) {
