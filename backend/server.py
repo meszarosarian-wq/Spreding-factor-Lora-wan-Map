@@ -370,9 +370,12 @@ async def chirpstack_webhook(payload: dict):
     """
     Process ChirpStack UplinkEvent webhook
     Updates device's SF buffer (FIFO, max 10 values) and recalculates average
+    DevEUI is normalized to UPPERCASE for consistent matching
     """
     try:
-        dev_eui = payload.get("devEui") or payload.get("deviceInfo", {}).get("devEui", "")
+        raw_dev_eui = payload.get("devEui") or payload.get("deviceInfo", {}).get("devEui", "")
+        # NORMALIZE DevEUI to UPPERCASE for consistent matching
+        dev_eui = raw_dev_eui.upper().strip()
         
         # Extract spreading factor from txInfo
         tx_info = payload.get("txInfo", {})
@@ -398,7 +401,7 @@ async def chirpstack_webhook(payload: dict):
         if not rx_info_list:
             rx_info_list = [{"gatewayId": "", "rssi": -100, "snr": 0}]
         
-        # Find the device in our database
+        # Find the device in our database (using normalized uppercase DevEUI)
         device = await db.devices.find_one({"dev_eui": dev_eui})
         device_name = device.get("name") if device else None
         device_registered = device is not None
@@ -406,14 +409,20 @@ async def chirpstack_webhook(payload: dict):
         # Create uplink logs for each gateway
         created_logs = []
         for rx_info in rx_info_list:
-            gateway_id_raw = rx_info.get("gatewayId", "")
+            raw_gateway_id = rx_info.get("gatewayId", "")
+            # Normalize gateway ID to uppercase as well
+            gateway_id_raw = raw_gateway_id.upper().strip() if raw_gateway_id else ""
             rssi = rx_info.get("rssi", -100)
             snr = rx_info.get("snr", 0)
             
-            # Try to find gateway by dev_eui first, then by id
+            # Try to find gateway by dev_eui first, then by id (case-insensitive)
             gateway = await db.gateways.find_one({"dev_eui": gateway_id_raw})
             if not gateway:
+                gateway = await db.gateways.find_one({"dev_eui": raw_gateway_id})  # Try original case
+            if not gateway:
                 gateway = await db.gateways.find_one({"id": gateway_id_raw})
+            if not gateway:
+                gateway = await db.gateways.find_one({"id": raw_gateway_id})  # Try original case
             gateway_name = gateway.get("name") if gateway else None
             gateway_registered = gateway is not None
             
