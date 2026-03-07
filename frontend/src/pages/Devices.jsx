@@ -29,7 +29,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, Radio, Upload, FileText, Download, Info, BarChart3, Search, ArrowUpDown, ArrowUp, ArrowDown, X } from "lucide-react";
+import { Plus, Pencil, Trash2, Radio, Upload, FileText, Download, Info, BarChart3, Search, ArrowUpDown, ArrowUp, ArrowDown, X, FileSpreadsheet } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -172,6 +172,39 @@ export default function Devices() {
   };
 
   const hasActiveFilters = searchTerm || filterSF !== "all" || sortField !== "name";
+
+  // Export devices to CSV
+  const exportDevicesToCSV = () => {
+    if (filteredDevices.length === 0) {
+      toast.error("Nu există date pentru export");
+      return;
+    }
+    
+    const headers = ["DevEUI", "Nume", "Latitudine", "Longitudine", "SF Mediu", "Buffer Size", "Ultima Activitate"];
+    const rows = filteredDevices.map(d => [
+      d.dev_eui,
+      d.name,
+      d.latitude,
+      d.longitude,
+      d.sf_average !== null ? d.sf_average.toFixed(2) : "",
+      d.sf_buffer?.length || 0,
+      d.last_seen || ""
+    ]);
+    
+    const csvContent = [
+      headers.join(","),
+      ...rows.map(row => row.map(cell => `"${cell}"`).join(","))
+    ].join("\n");
+    
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `devices_export_${new Date().toISOString().split("T")[0]}.csv`;
+    a.click();
+    window.URL.revokeObjectURL(url);
+    toast.success(`${filteredDevices.length} dispozitive exportate`);
+  };
 
   const handleOpenDialog = (device = null) => {
     if (device) {
