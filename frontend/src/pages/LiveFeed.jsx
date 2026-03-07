@@ -325,7 +325,7 @@ export default function LiveFeed() {
                   <TableRow className={theme === "dark" ? "border-zinc-800" : "border-slate-200"}>
                     <TableHead className={`font-mono text-xs uppercase ${textMuted} w-12`}>Status</TableHead>
                     <TableHead className={`font-mono text-xs uppercase ${textMuted}`}>Timp</TableHead>
-                    <TableHead className={`font-mono text-xs uppercase ${textMuted}`}>Dispozitiv</TableHead>
+                    <TableHead className={`font-mono text-xs uppercase ${textMuted}`}>Nume</TableHead>
                     <TableHead className={`font-mono text-xs uppercase ${textMuted}`}>DevEUI</TableHead>
                     <TableHead className={`font-mono text-xs uppercase ${textMuted}`}>Gateway</TableHead>
                     <TableHead className={`font-mono text-xs uppercase ${textMuted}`}>SF</TableHead>
