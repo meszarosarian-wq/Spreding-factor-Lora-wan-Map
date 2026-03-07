@@ -28,7 +28,8 @@ import {
   Radio, Zap, Signal, Activity, 
   Pause, Play, Eye, Send, Terminal,
   Wifi, WifiOff, AlertTriangle, Plus, Check,
-  Search, ArrowUpDown, ArrowUp, ArrowDown, X
+  Search, ArrowUpDown, ArrowUp, ArrowDown, X,
+  Download, FileSpreadsheet
 } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 
@@ -275,6 +276,40 @@ export default function LiveFeed() {
   };
 
   const hasActiveFilters = searchTerm || filterRegistered !== "all" || sortField !== "timestamp";
+
+  // Export to CSV function
+  const exportToCSV = () => {
+    if (filteredUplinks.length === 0) {
+      toast.error("Nu există date pentru export");
+      return;
+    }
+    
+    const headers = ["Timestamp", "DevEUI", "Device Name", "Registered", "Gateway", "SF", "RSSI (dBm)", "SNR (dB)"];
+    const rows = filteredUplinks.map(u => [
+      new Date(u.timestamp).toISOString(),
+      u.dev_eui,
+      u.device_name || "",
+      u.device_registered ? "Da" : "Nu",
+      u.gateway_name || u.gateway_id || "",
+      u.spreading_factor,
+      u.rssi,
+      u.snr.toFixed(2)
+    ]);
+    
+    const csvContent = [
+      headers.join(","),
+      ...rows.map(row => row.map(cell => `"${cell}"`).join(","))
+    ].join("\n");
+    
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `uplink_logs_${new Date().toISOString().split("T")[0]}.csv`;
+    a.click();
+    window.URL.revokeObjectURL(url);
+    toast.success(`${filteredUplinks.length} înregistrări exportate`);
+  };
 
   return (
     <div className="space-y-4" data-testid="live-feed-page">
