@@ -341,24 +341,28 @@ async def get_unregistered_devices():
 async def quick_register_device(dev_eui: str, name: str, latitude: float = 0.0, longitude: float = 0.0):
     """
     Quick register a device from the Live Feed
+    DevEUI is normalized to UPPERCASE
     """
+    # Normalize DevEUI to uppercase
+    normalized_dev_eui = dev_eui.upper().strip()
+    
     # Check if already exists
-    existing = await db.devices.find_one({"dev_eui": dev_eui})
+    existing = await db.devices.find_one({"dev_eui": normalized_dev_eui})
     if existing:
         raise HTTPException(status_code=400, detail="Device with this DevEUI already exists")
     
     device = Device(
-        dev_eui=dev_eui,
+        dev_eui=normalized_dev_eui,
         name=name,
         latitude=latitude,
         longitude=longitude
     )
     await db.devices.insert_one(device.model_dump())
     
-    # Update all existing uplinks for this device
+    # Update all existing uplinks for this device (check both cases)
     await db.uplinks.update_many(
-        {"dev_eui": dev_eui},
-        {"$set": {"device_name": name, "device_registered": True}}
+        {"$or": [{"dev_eui": normalized_dev_eui}, {"dev_eui": dev_eui}]},
+        {"$set": {"dev_eui": normalized_dev_eui, "device_name": name, "device_registered": True}}
     )
     
     return device
