@@ -21,9 +21,9 @@ Aplicație de monitorizare LoRaWAN care generează un heatmap de acoperire bazat
 - **Database**: MongoDB
 - **Map Tiles**: CartoDB Dark Matter
 
-## What's Been Implemented (Jan 2026)
+## What's Been Implemented
 
-### v1.0 - MVP
+### v1.0 - MVP (Jan 2026)
 - ✅ Dashboard cu hartă heatmap SF și statistici
 - ✅ Pagină Gateway-uri cu CRUD complet
 - ✅ Pagină Dispozitive cu CRUD + import CSV + download template
@@ -39,7 +39,18 @@ Aplicație de monitorizare LoRaWAN care generează un heatmap de acoperire bazat
 - ✅ **Praguri noi**: ≤8.5 Verde (Excelent), 8.6-10.5 Portocaliu (Mediu), >10.5 Roșu (Limită)
 - ✅ **DevEUI Gateway**: Câmp opțional pentru identificare gateway în ChirpStack
 - ✅ **Vizualizare Buffer**: Dialog pentru a vedea toate valorile SF din buffer
-- ✅ **Puncte variabile**: Dimensiune punct pe hartă bazată pe SF (mai mare = acoperire mai slabă)
+- ✅ **Puncte variabile**: Dimensiune punct pe hartă bazată pe SF
+
+### v1.2 - Search, Sort & Export (Jan 2026)
+- ✅ **Search pe toate paginile**: Gateways, Devices, Live Feed - căutare după nume, DevEUI, gateway
+- ✅ **Sort pe toate coloanele**: Click pe header pentru sortare ascendentă/descendentă
+- ✅ **Filtre avansate**: 
+  - Gateways: Status (Active/Inactive)
+  - Devices: Calitate SF (Excelent/Mediu/Slab/Fără date)
+  - Live Feed: Status înregistrare (Înregistrate/Neînregistrate)
+- ✅ **Export CSV**: Buton Export pe toate cele 3 pagini (Gateways, Devices, Live Feed)
+- ✅ **Counter filtre**: Afișare "X din Y" pentru rezultate filtrate
+- ✅ **Resetare filtre**: Buton pentru resetarea tuturor filtrelor
 
 ## API Endpoints
 - `GET/POST /api/gateways` - CRUD gateway-uri (include dev_eui)
@@ -60,9 +71,10 @@ Aplicație de monitorizare LoRaWAN care generează un heatmap de acoperire bazat
 - [x] Import CSV
 - [x] Buffer SF cu mediere (10 valori)
 - [x] DevEUI pentru gateway-uri
+- [x] Search/Sort pe toate tabelele
+- [x] Export CSV pentru toate datele
 
 ### P1 (High Priority)
-- [ ] Export date uplink în CSV/Excel
 - [ ] Notificări real-time pentru uplink-uri noi (WebSocket)
 - [ ] Dashboard cu grafice statistice (RSSI/SNR în timp)
 
@@ -73,6 +85,6 @@ Aplicație de monitorizare LoRaWAN care generează un heatmap de acoperire bazat
 - [ ] Mobile responsive optimization
 
 ## Next Tasks
-1. Adăugare grafice statistice (RSSI mediu pe dispozitiv, distribuție SF)
-2. WebSocket pentru actualizare în timp real
-3. Export uplink logs în CSV
+1. Implementare WebSocket pentru actualizare în timp real a Live Feed
+2. Adăugare grafice statistice (RSSI mediu pe dispozitiv, distribuție SF)
+3. Alerte automate pentru dispozitive cu SF slab
