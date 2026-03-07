@@ -248,6 +248,11 @@ export default function Gateways() {
 
             <span className={`text-sm ${textMuted}`}>{filteredGateways.length} din {gateways.length}</span>
 
+            <Button variant="outline" size="sm" onClick={exportGatewaysToCSV} 
+              className={theme === "dark" ? "border-emerald-700 text-emerald-400" : "border-emerald-300 text-emerald-600"}>
+              <FileSpreadsheet className="w-4 h-4 mr-2" />Export
+            </Button>
+
             <Button onClick={() => handleOpenDialog()} className="ml-auto bg-blue-600 hover:bg-blue-500 text-white">
               <Plus className="w-4 h-4 mr-2" />Adaugă Gateway
             </Button>
