@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import time
 
 class LoRaWANAPITester:
-    def __init__(self, base_url="https://sf-coverage-map.preview.emergentagent.com"):
+    def __init__(self, base_url="https://spreading-factor-viz.preview.emergentagent.com"):
         self.base_url = base_url
         self.api_url = f"{base_url}/api"
         self.tests_run = 0
