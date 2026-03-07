@@ -422,6 +422,11 @@ export default function LiveFeed() {
             <span className={`text-sm ${textMuted} ml-auto`}>
               {filteredUplinks.length} din {uplinks.length}
             </span>
+            
+            <Button variant="outline" size="sm" onClick={exportToCSV} 
+              className={theme === "dark" ? "border-zinc-700 text-zinc-300" : ""}>
+              <Download className="w-4 h-4 mr-2" />Export CSV
+            </Button>
           </div>
         </CardContent>
       </Card>
