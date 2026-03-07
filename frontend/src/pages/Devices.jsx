@@ -353,6 +353,9 @@ export default function Devices() {
               <Button variant="outline" onClick={() => fileInputRef.current?.click()} className={theme === "dark" ? "border-zinc-700 text-zinc-300" : ""}>
                 <Upload className="w-4 h-4 mr-2" />Import CSV
               </Button>
+              <Button variant="outline" onClick={exportDevicesToCSV} className={theme === "dark" ? "border-emerald-700 text-emerald-400" : "border-emerald-300 text-emerald-600"}>
+                <FileSpreadsheet className="w-4 h-4 mr-2" />Export
+              </Button>
               <Button onClick={() => handleOpenDialog()} className="bg-blue-600 hover:bg-blue-500 text-white">
                 <Plus className="w-4 h-4 mr-2" />Adaugă
               </Button>
