@@ -639,6 +639,102 @@ async def get_heatmap_data(
     
     return heatmap_points
 
+# ==================== SF RECALCULATION ====================
+
+@api_router.post("/recalculate-sf")
+async def recalculate_all_sf():
+    """
+    Recalculate SF buffers and averages for all devices based on their last 10 uplinks.
+    This is useful after fixing SF extraction logic to update historical data.
+    """
+    try:
+        # Get all devices
+        devices = await db.devices.find({}, {"_id": 0}).to_list(10000)
+        
+        updated_count = 0
+        devices_with_data = 0
+        
+        for device in devices:
+            dev_eui = device["dev_eui"]
+            
+            # Get last 10 uplinks for this device, sorted by timestamp desc
+            uplinks = await db.uplinks.find(
+                {"dev_eui": dev_eui},
+                {"_id": 0, "spreading_factor": 1, "timestamp": 1}
+            ).sort("timestamp", -1).limit(SF_BUFFER_SIZE).to_list(SF_BUFFER_SIZE)
+            
+            if uplinks:
+                # Build SF buffer from uplinks (reverse to get chronological order)
+                sf_buffer = [u["spreading_factor"] for u in reversed(uplinks) if u.get("spreading_factor")]
+                
+                if sf_buffer:
+                    sf_average = calculate_sf_average(sf_buffer)
+                    last_sf = sf_buffer[-1] if sf_buffer else None
+                    
+                    await db.devices.update_one(
+                        {"dev_eui": dev_eui},
+                        {"$set": {
+                            "sf_buffer": sf_buffer,
+                            "sf_average": sf_average,
+                            "last_sf": last_sf
+                        }}
+                    )
+                    devices_with_data += 1
+                    updated_count += 1
+            else:
+                # No uplinks - reset to empty
+                await db.devices.update_one(
+                    {"dev_eui": dev_eui},
+                    {"$set": {
+                        "sf_buffer": [],
+                        "sf_average": None,
+                        "last_sf": None
+                    }}
+                )
+                updated_count += 1
+        
+        logger.info(f"Recalculated SF for {updated_count} devices, {devices_with_data} have uplink data")
+        
+        return {
+            "status": "success",
+            "message": f"SF recalculated for {updated_count} devices",
+            "devices_with_data": devices_with_data,
+            "devices_without_data": updated_count - devices_with_data
+        }
+        
+    except Exception as e:
+        logger.error(f"Error recalculating SF: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/reset-sf-history")
+async def reset_sf_history():
+    """
+    Reset all SF buffers and averages to empty/null.
+    Use this to start fresh with correct SF values from new webhooks.
+    """
+    try:
+        result = await db.devices.update_many(
+            {},
+            {"$set": {
+                "sf_buffer": [],
+                "sf_average": None,
+                "last_sf": None,
+                "last_seen": None
+            }}
+        )
+        
+        logger.info(f"Reset SF history for {result.modified_count} devices")
+        
+        return {
+            "status": "success",
+            "message": f"SF history reset for {result.modified_count} devices",
+            "devices_reset": result.modified_count
+        }
+        
+    except Exception as e:
+        logger.error(f"Error resetting SF history: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ==================== SEED DATA ====================
 
 @api_router.post("/seed")
