@@ -22,8 +22,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, Router, MapPin, Search, ArrowUpDown, ArrowUp, ArrowDown, X, Download, FileSpreadsheet } from "lucide-react";
+import { Plus, Pencil, Trash2, Router, MapPin, Search, ArrowUpDown, ArrowUp, ArrowDown, X, Download, FileSpreadsheet, BarChart3 } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell } from "recharts";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -41,6 +42,11 @@ export default function Gateways() {
   const [sortField, setSortField] = useState("name");
   const [sortDirection, setSortDirection] = useState("asc");
   const [filterStatus, setFilterStatus] = useState("all");
+
+  // Frequency distribution state
+  const [freqGatewayId, setFreqGatewayId] = useState("");
+  const [freqData, setFreqData] = useState({ frequencies: [], total_messages: 0 });
+  const [freqLoading, setFreqLoading] = useState(false);
 
   // Theme classes
   const cardClass = theme === "dark" ? "bg-zinc-900 border-zinc-800" : "bg-white border-slate-200 shadow-sm";
@@ -63,6 +69,30 @@ export default function Gateways() {
   };
 
   useEffect(() => { fetchGateways(); }, []);
+
+  // Fetch frequency distribution when gateway is selected
+  useEffect(() => {
+    const fetchFrequencies = async () => {
+      if (!freqGatewayId) return;
+      setFreqLoading(true);
+      try {
+        const res = await axios.get(`${API}/stats/frequencies?gateway_id=${freqGatewayId}`);
+        setFreqData(res.data);
+      } catch (e) {
+        console.error("Error fetching frequencies:", e);
+      } finally {
+        setFreqLoading(false);
+      }
+    };
+    fetchFrequencies();
+  }, [freqGatewayId]);
+
+  // Auto-select first gateway for frequency chart
+  useEffect(() => {
+    if (gateways.length > 0 && !freqGatewayId) {
+      setFreqGatewayId(gateways[0].dev_eui || gateways[0].id);
+    }
+  }, [gateways, freqGatewayId]);
 
   // Filtered and sorted data
   const filteredGateways = useMemo(() => {
@@ -381,6 +411,76 @@ export default function Gateways() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Frequency Distribution Chart */}
+      <Card className={cardClass}>
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <CardTitle className={`text-base font-heading ${textPrimary} flex items-center gap-2`}>
+              <BarChart3 className="w-5 h-5 text-indigo-500" />
+              Distribuție Frecvențe (Received / Frequency)
+            </CardTitle>
+            <Select value={freqGatewayId} onValueChange={setFreqGatewayId}>
+              <SelectTrigger className={`w-[220px] h-8 text-xs ${inputClass}`}>
+                <SelectValue placeholder="Selectează gateway" />
+              </SelectTrigger>
+              <SelectContent className={dialogClass}>
+                {gateways.map(gw => (
+                  <SelectItem key={gw.id} value={gw.dev_eui || gw.id} className={textSecondary}>
+                    {gw.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {freqLoading ? (
+            <div className={`h-64 flex items-center justify-center ${textMuted}`}>
+              <p className="text-sm">Se încarcă...</p>
+            </div>
+          ) : freqData.frequencies.length === 0 ? (
+            <div className={`h-64 flex items-center justify-center ${textMuted}`}>
+              <p className="text-sm">Nu există date de frecvență pentru acest gateway. Trimiteți uplink-uri cu informații txInfo.frequency.</p>
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={freqData.frequencies} margin={{ top: 10, right: 10, left: 0, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={theme === "dark" ? "#3f3f46" : "#e2e8f0"} />
+                <XAxis
+                  dataKey="label"
+                  tick={{ fill: theme === "dark" ? "#a1a1aa" : "#64748b", fontSize: 11 }}
+                  interval={0}
+                  angle={-30}
+                  textAnchor="end"
+                  height={60}
+                />
+                <YAxis tick={{ fill: theme === "dark" ? "#a1a1aa" : "#64748b", fontSize: 11 }} />
+                <RechartsTooltip
+                  contentStyle={{
+                    backgroundColor: theme === "dark" ? "#18181b" : "#ffffff",
+                    border: `1px solid ${theme === "dark" ? "#3f3f46" : "#e2e8f0"}`,
+                    borderRadius: "8px",
+                    fontSize: "12px"
+                  }}
+                  formatter={(value) => [`${value} mesaje`, "Recepții"]}
+                />
+                <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+                  {freqData.frequencies.map((entry, index) => {
+                    const colors = ["#6366f1", "#8b5cf6", "#a855f7", "#c084fc", "#818cf8", "#7c3aed", "#6d28d9", "#5b21b6"];
+                    return <Cell key={index} fill={colors[index % colors.length]} />;
+                  })}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+          {freqData.total_messages > 0 && (
+            <p className={`text-xs text-center mt-2 ${textMuted}`}>
+              Total: {freqData.total_messages} mesaje pe {freqData.frequencies.length} frecvențe
+            </p>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

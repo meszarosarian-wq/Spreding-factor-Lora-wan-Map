@@ -1,9 +1,9 @@
-import { useEffect } from "react";
+import { useEffect, useState, useCallback } from "react";
 import "@/App.css";
 import { BrowserRouter, Routes, Route, NavLink, useLocation } from "react-router-dom";
 import axios from "axios";
 import { Toaster } from "@/components/ui/sonner";
-import { Radio, Router, Activity, List, Map, Sun, Moon, Zap, BarChart3 } from "lucide-react";
+import { Radio, Router, Activity, List, Map, Sun, Moon, Zap, BarChart3, Bell } from "lucide-react";
 import { ThemeProvider, useTheme } from "@/context/ThemeContext";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,6 +12,14 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 
 // Pages
 import Dashboard from "@/pages/Dashboard";
@@ -59,6 +67,72 @@ const ThemeToggle = () => {
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
+  );
+};
+
+const NotificationBell = () => {
+  const { theme } = useTheme();
+  const [alerts, setAlerts] = useState({ alerts: [], total: 0, critical: 0 });
+  
+  const fetchAlerts = useCallback(async () => {
+    try {
+      const res = await axios.get(`${API}/alerts`);
+      setAlerts(res.data);
+    } catch (e) {
+      // silently fail
+    }
+  }, []);
+  
+  useEffect(() => {
+    fetchAlerts();
+    const interval = setInterval(fetchAlerts, 30000);
+    return () => clearInterval(interval);
+  }, [fetchAlerts]);
+  
+  const criticalCount = alerts.critical + alerts.warning;
+  
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="sm" className="w-9 h-9 p-0 relative">
+          <Bell className={`w-5 h-5 ${criticalCount > 0 ? "text-red-500" : theme === "dark" ? "text-zinc-400" : "text-slate-600"}`} />
+          {criticalCount > 0 && (
+            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">
+              {criticalCount > 99 ? "99+" : criticalCount}
+            </span>
+          )}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent 
+        align="end" 
+        className={`w-80 max-h-96 overflow-y-auto ${theme === "dark" ? "bg-zinc-900 border-zinc-800" : "bg-white border-slate-200"}`}
+      >
+        <DropdownMenuLabel className={`text-xs font-mono uppercase ${theme === "dark" ? "text-zinc-400" : "text-slate-500"}`}>
+          Alerte NOC ({criticalCount})
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator className={theme === "dark" ? "bg-zinc-800" : "bg-slate-200"} />
+        {alerts.alerts.length === 0 ? (
+          <div className={`p-3 text-sm text-center ${theme === "dark" ? "text-zinc-500" : "text-slate-500"}`}>
+            Fără alerte active
+          </div>
+        ) : (
+          alerts.alerts.slice(0, 15).map((alert, idx) => (
+            <DropdownMenuItem key={idx} className={`flex items-start gap-2 p-2 cursor-default focus:bg-transparent ${
+              alert.severity === "critical" ? "text-red-500" : "text-amber-500"
+            }`}>
+              <span className="mt-0.5">{alert.type === "sf_critical" ? "🔴" : alert.type === "packet_loss" ? "📡" : "📴"}</span>
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-xs truncate">{alert.device_name}</p>
+                <p className={`text-xs truncate ${theme === "dark" ? "text-zinc-500" : "text-slate-500"}`}>
+                  {alert.dev_eui} • SF: {alert.sf_average ?? "N/A"}
+                </p>
+                <p className="text-xs opacity-80">{alert.message}</p>
+              </div>
+            </DropdownMenuItem>
+          ))
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 };
 
@@ -125,6 +199,7 @@ const Navigation = () => {
           
           <div className={`w-px h-6 ${theme === "dark" ? "bg-zinc-700" : "bg-slate-200"}`} />
           
+          <NotificationBell />
           <ThemeToggle />
         </div>
       </div>

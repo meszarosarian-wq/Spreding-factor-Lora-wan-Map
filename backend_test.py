@@ -677,6 +677,209 @@ class LoRaWANAPITester:
                 success = False
         return success
 
+    def test_webhook_frequency_v2(self):
+        """Test updated webhook with frequency extraction (no battery)"""
+        # Test webhook payload with frequency in txInfo
+        webhook_payload = {
+            "devEui": "0011223344556601",
+            "spreadingFactor": 8,
+            "fCnt": 500,
+            "txInfo": {"frequency": 868100000},
+            "rxInfo": [{"gatewayId": "AA00BB11CC22DD33", "rssi": -80, "snr": 7.0}]
+        }
+        
+        success, response = self.run_test("Webhook with Frequency (v2)", "POST", "chirpstack/webhook", 200, webhook_payload)
+        if success:
+            # Check response contains frequency info
+            if 'frequency' in response and response['frequency'] == 868100000:
+                self.log_test("Webhook Frequency - Extracted correctly", True)
+            else:
+                self.log_test("Webhook Frequency - Extracted correctly", False, f"Frequency not extracted: {response.get('frequency')}")
+            
+            # Verify NO battery_level in response (removed feature)
+            if 'battery_level' not in response:
+                self.log_test("Webhook - No battery field (correct)", True)
+            else:
+                self.log_test("Webhook - No battery field (correct)", False, f"Battery field should be removed: {response.get('battery_level')}")
+        
+        return success
+
+    def test_frequency_distribution_endpoint(self):
+        """Test new frequency distribution endpoint"""
+        success, response = self.run_test("Frequency Distribution", "GET", "stats/frequencies?gateway_id=AA00BB11CC22DD33", 200)
+        if success:
+            required_fields = ['frequencies', 'gateway_id', 'total_messages']
+            for field in required_fields:
+                if field not in response:
+                    self.log_test(f"Frequency Distribution - {field} field", False, f"Missing field: {field}")
+                    return False
+            
+            if isinstance(response['frequencies'], list):
+                self.log_test("Frequency Distribution - Frequencies is list", True)
+                
+                # Check frequency structure if data exists
+                if len(response['frequencies']) > 0:
+                    freq = response['frequencies'][0]
+                    freq_fields = ['frequency_hz', 'frequency_mhz', 'label', 'count']
+                    for field in freq_fields:
+                        if field not in freq:
+                            self.log_test(f"Frequency Distribution - {field} field", False, f"Missing frequency field: {field}")
+                            return False
+                    
+                    # Verify format is correct (e.g. "868.1 MHz")
+                    if 'label' in freq and 'MHz' in freq['label']:
+                        self.log_test("Frequency Distribution - Label format correct", True)
+                    else:
+                        self.log_test("Frequency Distribution - Label format correct", False, f"Label format incorrect: {freq.get('label')}")
+                    
+                    self.log_test("Frequency Distribution - Structure valid", True)
+            else:
+                self.log_test("Frequency Distribution - Frequencies is list", False, "Frequencies field is not a list")
+            
+            self.log_test("Frequency Distribution - All fields present", True)
+        return success
+
+    def test_alerts_no_battery(self):
+        """Test alerts endpoint does NOT contain battery alerts"""
+        success, response = self.run_test("Alerts (No Battery)", "GET", "alerts", 200)
+        if success:
+            required_fields = ['alerts', 'total', 'critical', 'warning']
+            for field in required_fields:
+                if field not in response:
+                    self.log_test(f"Alerts No Battery - {field} field", False, f"Missing field: {field}")
+                    return False
+            
+            # Check that NO alerts have type "low_battery" 
+            has_battery_alerts = False
+            valid_alert_types = ["packet_loss", "sf_critical", "offline"]
+            
+            for alert in response['alerts']:
+                if alert.get('type') == 'low_battery':
+                    has_battery_alerts = True
+                    break
+            
+            if not has_battery_alerts:
+                self.log_test("Alerts No Battery - No battery alerts (correct)", True)
+            else:
+                self.log_test("Alerts No Battery - No battery alerts (correct)", False, "Found low_battery alert type")
+            
+            # Check for expected alert types that exist in the data
+            alert_types_found = [alert.get('type') for alert in response['alerts']]
+            unique_types = list(set(alert_types_found))
+            
+            # Verify only valid alert types are present
+            invalid_types = [t for t in unique_types if t not in valid_alert_types]
+            if not invalid_types:
+                self.log_test("Alerts - Only valid alert types present", True)
+            else:
+                self.log_test("Alerts - Only valid alert types present", False, f"Invalid types found: {invalid_types}")
+            
+            # Report what alert types are actually present
+            if unique_types:
+                self.log_test(f"Alerts - Alert types found: {unique_types}", True)
+            else:
+                self.log_test("Alerts - No alerts found (normal)", True)
+            
+            self.log_test("Alerts No Battery - Structure valid", True)
+        return success
+
+    def test_delete_unregistered_uplinks(self):
+        """Test delete unregistered device uplinks endpoint"""
+        # First send a webhook from an unregistered device
+        unregistered_payload = {
+            "devEui": "UNREGISTERED999",
+            "spreadingFactor": 7,
+            "rxInfo": [{"gatewayId": "AA00BB11CC22DD33", "rssi": -90, "snr": 5.0}]
+        }
+        
+        success1, response1 = self.run_test("Webhook Unregistered Device", "POST", "chirpstack/webhook", 200, unregistered_payload)
+        if not success1:
+            return False
+        
+        # Small delay to ensure webhook is processed
+        time.sleep(1)
+        
+        # Now delete the unregistered uplinks
+        success, response = self.run_test("Delete Unregistered Uplinks", "DELETE", "uplinks/unregistered/UNREGISTERED999", 200)
+        if success:
+            required_fields = ['status', 'message', 'deleted_count']
+            for field in required_fields:
+                if field not in response:
+                    self.log_test(f"Delete Unregistered - {field} field", False, f"Missing field: {field}")
+                    return False
+            
+            if response['status'] == 'success':
+                self.log_test("Delete Unregistered - Success status", True)
+            else:
+                self.log_test("Delete Unregistered - Success status", False, f"Status: {response['status']}")
+            
+            if response['deleted_count'] >= 1:
+                self.log_test("Delete Unregistered - Uplinks deleted", True)
+            else:
+                self.log_test("Delete Unregistered - Uplinks deleted", False, f"Deleted count: {response['deleted_count']}")
+        
+        return success
+
+    def test_heatmap_no_battery_field(self):
+        """Test heatmap does NOT include battery_level field"""
+        success, heatmap_data = self.run_test("Heatmap No Battery Field", "GET", "heatmap", 200)
+        if success and isinstance(heatmap_data, list):
+            if len(heatmap_data) > 0:
+                point = heatmap_data[0]
+                
+                # Check that battery_level field is NOT present
+                if 'battery_level' not in point:
+                    self.log_test("Heatmap - No battery_level field (correct)", True)
+                else:
+                    self.log_test("Heatmap - No battery_level field (correct)", False, f"Battery level field should be removed: {point.get('battery_level')}")
+                
+                # Verify other NOC fields are still present
+                expected_noc_fields = ['packets_lost', 'consecutive_lost']
+                for field in expected_noc_fields:
+                    if field in point:
+                        self.log_test(f"Heatmap - {field} field present", True)
+                    else:
+                        self.log_test(f"Heatmap - {field} field present", False, f"Missing NOC field: {field}")
+            else:
+                self.log_test("Heatmap No Battery", False, "No heatmap data to verify")
+                success = False
+        return success
+
+    def run_noc_update_tests(self):
+        """Run tests for NEW/UPDATED NOC endpoints"""
+        print("🔄 Testing NOC Endpoint Updates...")
+        print(f"Testing against: {self.base_url}")
+        print("=" * 50)
+
+        # Test updated webhook with frequency (no battery)
+        self.test_webhook_frequency_v2()
+        
+        # Test new frequency distribution endpoint
+        self.test_frequency_distribution_endpoint()
+        
+        # Test updated alerts (no battery alerts)
+        self.test_alerts_no_battery()
+        
+        # Test delete unregistered device uplinks
+        self.test_delete_unregistered_uplinks()
+        
+        # Test recalculate SF still works
+        self.test_recalculate_sf_endpoint()
+        
+        # Test heatmap does not include battery_level
+        self.test_heatmap_no_battery_field()
+
+        # Print summary
+        print("=" * 50)
+        print(f"📊 NOC Update Test Results: {self.tests_passed}/{self.tests_run} passed")
+        
+        if self.tests_passed == self.tests_run:
+            print("🎉 All NOC update tests passed!")
+            return 0
+        else:
+            print("❌ Some NOC update tests failed!")
+            return 1
+
     def run_all_tests(self):
         """Run all API tests"""
         print("🚀 Starting LoRaWAN API Tests...")
@@ -735,6 +938,12 @@ class LoRaWANAPITester:
             return 1
 
 def main():
+    tester = LoRaWANAPITester()
+    # Run only the NOC update tests as requested in review
+    return tester.run_noc_update_tests()
+
+def run_all_tests():
+    """Function to run all tests if needed"""
     tester = LoRaWANAPITester()
     return tester.run_all_tests()
 

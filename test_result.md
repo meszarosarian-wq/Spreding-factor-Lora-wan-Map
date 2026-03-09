@@ -255,6 +255,66 @@ backend:
           agent: "testing"
           comment: "Enhanced webhook functionality tested successfully. POST /api/chirpstack/webhook correctly extracts fCnt from payload and updates device.last_fcnt. Battery level extraction working from object.battery field and updates device.battery_level. Packet loss detection working - correctly detected 4 lost packets when fCnt gap from 100 to 105, updated both device.packets_lost and device.consecutive_lost counters. Heatmap endpoint confirmed to include all NOC fields: battery_level, packets_lost, consecutive_lost. 9/9 enhanced webhook tests passed."
 
+  - task: "Webhook fCnt + Frequency + Packet Loss (v2)"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Updated: removed battery extraction, added frequency extraction from txInfo.frequency. Need retesting."
+        - working: true
+          agent: "testing"
+          comment: "Webhook v2 tested successfully. POST /api/chirpstack/webhook correctly extracts frequency from txInfo.frequency field (868100000 Hz) and includes it in response. Battery extraction removed as intended. Frequency data properly stored in uplink logs. Payload structure: devEui, spreadingFactor, fCnt, txInfo.frequency, rxInfo tested and working."
+
+  - task: "Frequency Distribution Endpoint"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "New GET /api/stats/frequencies?gateway_id={id} endpoint. Groups uplinks by frequency, converts Hz to MHz."
+        - working: true
+          agent: "testing"
+          comment: "Frequency Distribution endpoint working perfectly. GET /api/stats/frequencies?gateway_id=AA00BB11CC22DD33 returns proper structure with frequencies array. Each frequency object contains frequency_hz, frequency_mhz, label (e.g., '868.1 MHz'), and count. Successfully tested with 868.1 MHz frequency showing in results."
+
+  - task: "Delete Unregistered Device Uplinks"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "New DELETE /api/uplinks/unregistered/{dev_eui} endpoint."
+        - working: true
+          agent: "testing"
+          comment: "Delete unregistered uplinks endpoint working correctly. Successfully tested by first creating uplinks from unregistered device 'UNREGISTERED999', then DELETE /api/uplinks/unregistered/UNREGISTERED999 successfully deleted the uplinks. Response includes status: success, message, and deleted_count fields."
+
+  - task: "Alerts Updated (no battery)"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Alerts: packet_loss, sf_critical (>10.5), offline (>24h). Removed battery."
+        - working: true
+          agent: "testing"
+          comment: "Updated alerts endpoint working correctly. GET /api/alerts verified to NOT contain any 'low_battery' type alerts. Only valid alert types present: packet_loss, sf_critical, offline. Response structure includes alerts array, total, critical, warning counts. Currently showing packet_loss and sf_critical alerts in production data. Battery alerts successfully removed from system."
+
 frontend:
   - task: "Dashboard with SF Heatmap"
     implemented: true
@@ -331,7 +391,7 @@ frontend:
 metadata:
   created_by: "main_agent"
   version: "1.0"
-  test_sequence: 3
+  test_sequence: 4
   run_ui: false
 
 test_plan:
@@ -342,6 +402,6 @@ test_plan:
 
 agent_communication:
     - agent: "main"
-      message: "Implemented all 4 NOC features. Backend has new endpoints: /api/alerts, /api/analytics/sf-distribution, /api/analytics/top-problematic, /api/analytics/rf-quality/{dev_eui}, /api/analytics/gateway-load. Webhook now extracts fCnt, battery_level, calculates packet loss. Frontend has new Analytics page with 4 Recharts graphs and Dashboard has alerts panel + new map colors. Please test the NEW endpoints focusing on: 1) analytics endpoints return correct data, 2) webhook with fCnt and battery payload correctly updates device, 3) packet loss detection works."
+      message: "Updated backend: removed battery, added frequency extraction, new /api/stats/frequencies endpoint, new DELETE /api/uplinks/unregistered/{dev_eui}, updated alerts (no battery, added sf_critical). Webhook now extracts frequency from txInfo.frequency. Please test NEW endpoints: 1) POST webhook with txInfo.frequency and verify frequency saved in uplink, 2) GET /api/stats/frequencies?gateway_id=AA00BB11CC22DD33 returns frequency distribution, 3) GET /api/alerts no longer returns battery alerts but includes sf_critical, 4) DELETE /api/uplinks/unregistered/{dev_eui} for unregistered devices, 5) Verify /api/recalculate-sf still works."
     - agent: "testing"
-      message: "TESTING COMPLETE: All NOC analytics endpoints working correctly. Tested 9 new endpoints/features: alerts (shows 1 packet loss warning), SF distribution (proper percentages), top problematic nodes (both packet_loss and SNR metrics), RF quality timeline, gateway load analytics, device list, enhanced webhook with fCnt=100 & battery=85.5% extraction, packet loss detection (4 packets gap detected correctly), heatmap NOC fields integration. All backend APIs returning proper JSON structure and data. Ready for production use."
+      message: "Completed testing of all NEW/UPDATED NOC endpoints. All 24/24 tests passed successfully. Key findings: 1) Webhook frequency extraction working (txInfo.frequency → 868100000 Hz in response), 2) Frequency distribution endpoint functional with proper Hz→MHz conversion and labeling, 3) Alerts endpoint confirmed NO battery alerts, only packet_loss/sf_critical/offline types, 4) Delete unregistered uplinks working correctly, 5) Recalculate SF still operational, 6) Heatmap confirmed to exclude battery_level field. All backend API changes tested and verified working correctly."

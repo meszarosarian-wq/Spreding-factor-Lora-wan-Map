@@ -8,7 +8,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer
 } from "recharts";
 import {
-  AlertTriangle, Battery, Wifi, WifiOff, BarChart3, PieChart as PieChartIcon,
+  AlertTriangle, Wifi, WifiOff, BarChart3, PieChart as PieChartIcon,
   Activity, TrendingDown, RefreshCw, Radio
 } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
@@ -36,6 +36,7 @@ export default function Analytics() {
   const [selectedDevice, setSelectedDevice] = useState("");
   const [selectedGateway, setSelectedGateway] = useState("all");
   const [problemMetric, setProblemMetric] = useState("packet_loss");
+  const [deviceSearch, setDeviceSearch] = useState("");
   const [loading, setLoading] = useState(true);
 
   // Theme-based colors
@@ -164,6 +165,13 @@ export default function Analytics() {
     }) : idx,
   }));
 
+  // Filter devices for search
+  const filteredDevices = devices.filter(d => {
+    if (!deviceSearch) return true;
+    const search = deviceSearch.toLowerCase();
+    return (d.name || "").toLowerCase().includes(search) || (d.dev_eui || "").toLowerCase().includes(search);
+  });
+
   // Format gateway load data
   const gatewayLoadFormatted = gatewayLoad.hourly_data.map(d => ({
     ...d,
@@ -179,7 +187,7 @@ export default function Analytics() {
   const getAlertIcon = (type) => {
     switch (type) {
       case "packet_loss": return <WifiOff className="w-4 h-4" />;
-      case "low_battery": return <Battery className="w-4 h-4" />;
+      case "sf_critical": return <AlertTriangle className="w-4 h-4" />;
       case "offline": return <Wifi className="w-4 h-4" />;
       default: return <AlertTriangle className="w-4 h-4" />;
     }
@@ -188,7 +196,7 @@ export default function Analytics() {
   const getAlertTypeLabel = (type) => {
     switch (type) {
       case "packet_loss": return "Packet Loss";
-      case "low_battery": return "Baterie";
+      case "sf_critical": return "SF Critic";
       case "offline": return "Offline";
       default: return type;
     }
@@ -374,18 +382,32 @@ export default function Analytics() {
                 Evoluție Calitate RF
                 <span className={`text-xs font-mono ${textMuted}`}>(7 zile)</span>
               </CardTitle>
-              <Select value={selectedDevice} onValueChange={setSelectedDevice}>
-                <SelectTrigger className={`w-[200px] h-8 text-xs ${theme === "dark" ? "bg-zinc-950 border-zinc-800 text-zinc-300" : "bg-white border-slate-200 text-slate-700"}`}>
-                  <SelectValue placeholder="Selectează dispozitiv" />
-                </SelectTrigger>
-                <SelectContent className={`max-h-60 ${theme === "dark" ? "bg-zinc-900 border-zinc-800" : "bg-white border-slate-200"}`}>
-                  {devices.map(d => (
-                    <SelectItem key={d.dev_eui} value={d.dev_eui} className={textSecondary}>
-                      {d.name || d.dev_eui}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Caută dispozitiv..."
+                    value={deviceSearch}
+                    onChange={(e) => setDeviceSearch(e.target.value)}
+                    className={`w-[140px] h-8 text-xs px-2 rounded border ${theme === "dark" ? "bg-zinc-950 border-zinc-800 text-zinc-300 placeholder:text-zinc-600" : "bg-white border-slate-200 text-slate-700 placeholder:text-slate-400"}`}
+                  />
+                </div>
+                <Select value={selectedDevice} onValueChange={(val) => { setSelectedDevice(val); setDeviceSearch(""); }}>
+                  <SelectTrigger className={`w-[180px] h-8 text-xs ${theme === "dark" ? "bg-zinc-950 border-zinc-800 text-zinc-300" : "bg-white border-slate-200 text-slate-700"}`}>
+                    <SelectValue placeholder="Selectează dispozitiv" />
+                  </SelectTrigger>
+                  <SelectContent className={`max-h-60 ${theme === "dark" ? "bg-zinc-900 border-zinc-800" : "bg-white border-slate-200"}`}>
+                    {filteredDevices.map(d => (
+                      <SelectItem key={d.dev_eui} value={d.dev_eui} className={textSecondary}>
+                        {d.name || d.dev_eui}
+                      </SelectItem>
+                    ))}
+                    {filteredDevices.length === 0 && (
+                      <div className={`p-2 text-xs ${textMuted}`}>Niciun rezultat</div>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </CardHeader>
           <CardContent>

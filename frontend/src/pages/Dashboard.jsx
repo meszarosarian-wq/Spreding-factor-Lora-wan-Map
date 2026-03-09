@@ -8,6 +8,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import { format } from "date-fns";
 import { ro } from "date-fns/locale";
 import { 
@@ -117,6 +119,8 @@ export default function Dashboard() {
   const [selectedGateway, setSelectedGateway] = useState("all");
   const [startDate, setStartDate] = useState(null);
   const [endDate, setEndDate] = useState(null);
+  const [showCriticalOnly, setShowCriticalOnly] = useState(false);
+  const [showInactive, setShowInactive] = useState(false);
 
   // Map tile URLs
   const darkTileUrl = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
@@ -183,6 +187,28 @@ export default function Dashboard() {
     
     return [avgLat, avgLng];
   }, [heatmapData, gateways]);
+
+  // Filter heatmap data based on toggles
+  const filteredHeatmapData = useMemo(() => {
+    let data = heatmapData;
+    
+    if (showCriticalOnly) {
+      data = data.filter(p => {
+        const sfAvg = p.sf_average ?? p.spreading_factor;
+        return sfAvg !== null && sfAvg !== undefined && sfAvg > 10.5;
+      });
+    }
+    
+    return data;
+  }, [heatmapData, showCriticalOnly]);
+
+  // Check if device is inactive (>24h)
+  const isDeviceInactive = (lastSeen) => {
+    if (!lastSeen) return false;
+    const lastSeenDate = new Date(lastSeen);
+    const now = new Date();
+    return (now - lastSeenDate) / (1000 * 60 * 60) > 24;
+  };
 
   // Dynamic classes based on theme
   const cardClass = theme === "dark" 
@@ -335,6 +361,30 @@ export default function Dashboard() {
               Reîmprospătare
             </Button>
           </div>
+          
+          {/* Map Filter Toggles */}
+          <div className="flex flex-wrap items-center gap-6 mt-3 pt-3 border-t border-zinc-800/50">
+            <div className="flex items-center gap-2">
+              <Switch
+                id="critical-only"
+                checked={showCriticalOnly}
+                onCheckedChange={setShowCriticalOnly}
+              />
+              <Label htmlFor="critical-only" className={`text-xs cursor-pointer ${textSecondary}`}>
+                Doar critice (SF &gt; 10.5)
+              </Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch
+                id="show-inactive"
+                checked={showInactive}
+                onCheckedChange={setShowInactive}
+              />
+              <Label htmlFor="show-inactive" className={`text-xs cursor-pointer ${textSecondary}`}>
+                Arată inactive (&gt;24h) în gri
+              </Label>
+            </div>
+          </div>
         </CardContent>
       </Card>
 
@@ -417,9 +467,10 @@ export default function Dashboard() {
                 </Marker>
               ))}
 
-              {heatmapData.map((point) => {
+              {filteredHeatmapData.map((point) => {
                 const sfValue = point.sf_average ?? point.spreading_factor;
-                const color = getSFColor(sfValue, point.last_seen);
+                const inactive = isDeviceInactive(point.last_seen);
+                const color = (showInactive && inactive) ? "#71717a" : getSFColor(sfValue, point.last_seen);
                 const radius = getMarkerRadius(sfValue);
                 
                 return (
@@ -462,14 +513,6 @@ export default function Dashboard() {
                             <div className="flex justify-between text-xs">
                               <span className={textSecondary}>SNR:</span>
                               <span className={`font-mono ${textSecondary}`}>{point.snr} dB</span>
-                            </div>
-                          )}
-                          {point.battery_level !== null && point.battery_level !== undefined && (
-                            <div className="flex justify-between text-xs">
-                              <span className={textSecondary}>Baterie:</span>
-                              <span className={`font-mono ${point.battery_level < 20 ? "text-red-500 font-bold" : textSecondary}`}>
-                                {point.battery_level}%
-                              </span>
                             </div>
                           )}
                           {point.packets_lost > 0 && (

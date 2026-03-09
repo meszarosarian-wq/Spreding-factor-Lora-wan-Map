@@ -63,7 +63,6 @@ class Device(BaseModel):
     last_fcnt: Optional[int] = None  # Last frame counter received
     packets_lost: int = 0  # Total packets lost (cumulative)
     consecutive_lost: int = 0  # Consecutive packets lost (resets on successful reception)
-    battery_level: Optional[float] = None  # Battery percentage (0-100) or voltage
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 class DeviceCreate(BaseModel):
@@ -86,7 +85,7 @@ class UplinkLog(BaseModel):
     spreading_factor: int
     # NOC Fields
     fcnt: Optional[int] = None  # Frame counter from ChirpStack
-    battery_level: Optional[float] = None  # Battery level at time of uplink
+    frequency: Optional[int] = None  # Frequency in Hz (e.g. 868100000)
     packets_lost: int = 0  # Packets lost detected at this uplink
     timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -407,39 +406,19 @@ async def chirpstack_webhook(payload: dict):
             logger.warning(f"Could not extract fCnt: {e}")
             fcnt = None
         
-        # ===== EXTRACT Battery Level =====
-        battery_level = None
+        # ===== EXTRACT Frequency =====
+        frequency = None
         try:
-            # Method 1: From decoded 'object' field (application-level decoded payload)
-            obj = payload.get("object") or payload.get("data") or {}
-            if isinstance(obj, dict):
-                battery_level = obj.get("battery") or obj.get("batteryLevel") or obj.get("battery_level") or obj.get("batt") or obj.get("vBat")
-            
-            # Method 2: From deviceStatus (MAC layer battery status)
-            if battery_level is None:
-                device_status = payload.get("deviceStatus") or payload.get("deviceInfo", {}).get("deviceStatus", {})
-                if isinstance(device_status, dict):
-                    bat_raw = device_status.get("batteryLevel") or device_status.get("battery")
-                    if bat_raw is not None:
-                        battery_level = float(bat_raw)
-                        # ChirpStack battery is 0-254 (0=external, 1-254 mapped, 255=unable)
-                        if battery_level > 100:
-                            battery_level = round((battery_level / 254.0) * 100, 1)
-            
-            # Method 3: From root-level battery field
-            if battery_level is None:
-                bat_root = payload.get("battery") or payload.get("batteryLevel")
-                if bat_root is not None:
-                    battery_level = float(bat_root)
-                    if battery_level > 100:
-                        battery_level = round((battery_level / 254.0) * 100, 1)
-            
-            if battery_level is not None:
-                battery_level = round(float(battery_level), 1)
-                logger.info(f"Battery level extracted: {battery_level}%")
+            tx_info_freq = payload.get("txInfo", {})
+            frequency = tx_info_freq.get("frequency")
+            if frequency is None:
+                frequency = payload.get("frequency")
+            if frequency is not None:
+                frequency = int(frequency)
+                logger.info(f"Frequency extracted: {frequency} Hz")
         except (ValueError, TypeError) as e:
-            logger.warning(f"Could not extract battery level: {e}")
-            battery_level = None
+            logger.warning(f"Could not extract frequency: {e}")
+            frequency = None
         
         # Extract spreading factor - check multiple locations
         spreading_factor = None
@@ -561,7 +540,7 @@ async def chirpstack_webhook(payload: dict):
                 snr=float(snr),
                 spreading_factor=spreading_factor,
                 fcnt=fcnt,
-                battery_level=battery_level,
+                frequency=frequency,
                 packets_lost=lost_packets
             )
             
@@ -602,10 +581,6 @@ async def chirpstack_webhook(payload: dict):
                 # Reset consecutive counter on successful reception
                 update_fields["consecutive_lost"] = 0
             
-            # Update battery level
-            if battery_level is not None:
-                update_fields["battery_level"] = battery_level
-            
             await db.devices.update_one(
                 {"dev_eui": dev_eui},
                 {"$set": update_fields}
@@ -617,8 +592,8 @@ async def chirpstack_webhook(payload: dict):
             "logs_created": len(created_logs),
             "sf_buffer_size": len(device.get("sf_buffer", [])) + 1 if device else 0,
             "fcnt": fcnt,
-            "packets_lost": lost_packets,
-            "battery_level": battery_level
+            "frequency": frequency,
+            "packets_lost": lost_packets
         }
         
     except Exception as e:
@@ -733,7 +708,6 @@ async def get_heatmap_data(
             "rssi": latest_uplink.get("rssi") if latest_uplink else None,
             "snr": latest_uplink.get("snr") if latest_uplink else None,
             # NOC fields
-            "battery_level": device.get("battery_level"),
             "packets_lost": device.get("packets_lost", 0),
             "consecutive_lost": device.get("consecutive_lost", 0),
         })
@@ -747,7 +721,7 @@ async def get_alerts():
     """
     Get active NOC alerts:
     - Packet loss: devices with consecutive_lost > 3
-    - Low battery: devices with battery_level < 20%
+    - SF Critical: devices with sf_average > 10.5
     - Offline: devices not seen for > 24 hours
     """
     now = datetime.now(timezone.utc)
@@ -768,19 +742,21 @@ async def get_alerts():
                 "device_name": device.get("name", "Unknown"),
                 "message": f"{consecutive_lost} pachete consecutive pierdute",
                 "value": consecutive_lost,
+                "sf_average": device.get("sf_average"),
                 "timestamp": device.get("last_seen")
             })
         
-        # Low battery alert: battery_level < 20%
-        battery_level = device.get("battery_level")
-        if battery_level is not None and battery_level < 20:
+        # SF Critical alert: sf_average > 10.5
+        sf_average = device.get("sf_average")
+        if sf_average is not None and sf_average > 10.5:
             alerts.append({
-                "type": "low_battery",
-                "severity": "critical" if battery_level < 10 else "warning",
+                "type": "sf_critical",
+                "severity": "critical",
                 "dev_eui": device["dev_eui"],
                 "device_name": device.get("name", "Unknown"),
-                "message": f"Baterie scăzută: {battery_level}%",
-                "value": battery_level,
+                "message": f"SF mediu critic: {sf_average}",
+                "value": sf_average,
+                "sf_average": sf_average,
                 "timestamp": device.get("last_seen")
             })
         
@@ -794,6 +770,7 @@ async def get_alerts():
                 "device_name": device.get("name", "Unknown"),
                 "message": f"Dispozitiv offline de peste 24 ore",
                 "value": last_seen,
+                "sf_average": device.get("sf_average"),
                 "timestamp": last_seen
             })
     
@@ -1017,10 +994,75 @@ async def get_device_list_for_analytics():
     """
     devices = await db.devices.find(
         {},
-        {"_id": 0, "dev_eui": 1, "name": 1, "last_seen": 1, "last_sf": 1, "battery_level": 1}
+        {"_id": 0, "dev_eui": 1, "name": 1, "last_seen": 1, "last_sf": 1}
     ).to_list(10000)
     
     return devices
+
+
+@api_router.get("/stats/frequencies")
+async def get_frequency_distribution(gateway_id: Optional[str] = None):
+    """
+    Get frequency distribution (count per frequency) for a specific gateway or all gateways.
+    Returns data for Bar Chart (Received / Frequency like ChirpStack).
+    """
+    match_stage = {}
+    if gateway_id:
+        match_stage["gateway_id"] = gateway_id
+    
+    # Only include uplinks that have frequency data
+    match_stage["frequency"] = {"$ne": None, "$exists": True}
+    
+    pipeline = [
+        {"$match": match_stage},
+        {"$group": {
+            "_id": "$frequency",
+            "count": {"$sum": 1}
+        }},
+        {"$sort": {"_id": 1}}
+    ]
+    
+    results = await db.uplinks.aggregate(pipeline).to_list(100)
+    
+    frequencies = []
+    for r in results:
+        freq_hz = r["_id"]
+        if freq_hz:
+            freq_mhz = round(freq_hz / 1_000_000, 1)
+            frequencies.append({
+                "frequency_hz": freq_hz,
+                "frequency_mhz": freq_mhz,
+                "label": f"{freq_mhz} MHz",
+                "count": r["count"]
+            })
+    
+    return {
+        "frequencies": frequencies,
+        "gateway_id": gateway_id,
+        "total_messages": sum(f["count"] for f in frequencies)
+    }
+
+
+@api_router.delete("/uplinks/unregistered/{dev_eui}")
+async def delete_unregistered_uplinks(dev_eui: str):
+    """
+    Delete/ignore all uplinks from an unregistered device.
+    Used from Live Feed to dismiss unregistered device alerts.
+    """
+    normalized = dev_eui.upper().strip()
+    
+    # Verify the device is indeed not registered
+    existing_device = await db.devices.find_one({"dev_eui": normalized})
+    if existing_device:
+        raise HTTPException(status_code=400, detail="Device is registered. Use the devices endpoint to manage it.")
+    
+    result = await db.uplinks.delete_many({"dev_eui": normalized, "device_registered": False})
+    
+    return {
+        "status": "success",
+        "message": f"Deleted {result.deleted_count} uplinks from unregistered device {normalized}",
+        "deleted_count": result.deleted_count
+    }
 
 # ==================== SF RECALCULATION ====================
 
