@@ -52,14 +52,31 @@ Aplicație de monitorizare LoRaWAN care generează un heatmap de acoperire bazat
 - ✅ **Counter filtre**: Afișare "X din Y" pentru rezultate filtrate
 - ✅ **Resetare filtre**: Buton pentru resetarea tuturor filtrelor
 
+### v1.3 - NOC Features (Mar 2026)
+- ✅ **Packet Loss Detection (fCnt)**: Extragere fCnt din webhook, calcul pachete pierdute, alertă consecutiv >3
+- ✅ **Battery Level Monitoring**: Extragere baterie din payload object/deviceStatus, alertă sub 20%
+- ✅ **Hartă NOC**: Culori noi (Verde SF≤9, Portocaliu SF=10, Roșu SF≥11 sau offline >24h)
+- ✅ **Alerte NOC**: Panou alerte pe Dashboard și Analytics (packet loss, baterie, offline)
+- ✅ **Analytics Page cu 4 Grafice**:
+  - SF Distribution (Donut Chart) - procentaj per SF în rețea
+  - Top 10 Noduri cu Probleme (Bar Chart) - pachete pierdute sau SNR scăzut
+  - Evoluție Calitate RF (Line Chart) - RSSI/SNR pe 7 zile per nod
+  - Încărcare Gateway (Area Chart) - uplinks/oră pentru monitorizare Duty Cycle
+
 ## API Endpoints
 - `GET/POST /api/gateways` - CRUD gateway-uri (include dev_eui)
 - `GET/POST /api/devices` - CRUD dispozitive (include sf_buffer, sf_average)
 - `POST /api/devices/import-csv` - Import CSV
 - `GET /api/uplinks` - Istoric mesaje
 - `POST /api/chirpstack/webhook` - Webhook ChirpStack (actualizează buffer)
-- `GET /api/heatmap` - Date pentru hartă (include sf_average, sf_buffer_size)
+- `GET /api/heatmap` - Date pentru hartă (include sf_average, sf_buffer_size, battery_level, packets_lost)
 - `GET /api/stats` - Statistici dashboard
+- `GET /api/alerts` - Alerte NOC active (packet loss, baterie, offline)
+- `GET /api/analytics/sf-distribution` - Distribuție SF pentru Donut Chart
+- `GET /api/analytics/top-problematic` - Top 10 noduri problematice (metric=packet_loss|snr)
+- `GET /api/analytics/rf-quality/{dev_eui}` - Evoluție RSSI/SNR pe 7 zile
+- `GET /api/analytics/gateway-load` - Trafic gateway pe oră
+- `GET /api/analytics/device-list` - Lista dispozitive pentru selectoare
 - `POST /api/seed` - Date demo
 
 ## Prioritized Backlog
