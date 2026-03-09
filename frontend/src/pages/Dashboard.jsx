@@ -61,6 +61,25 @@ const getMarkerRadius = (sfAvg) => {
   return 16;
 };
 
+// Component to auto-fit map bounds to data
+function MapBoundsUpdater({ points, gateways }) {
+  const map = useMap();
+  
+  useEffect(() => {
+    const allPoints = [
+      ...points.map(p => [p.latitude, p.longitude]),
+      ...gateways.map(g => [g.latitude, g.longitude])
+    ].filter(p => p[0] && p[1]);
+    
+    if (allPoints.length > 0) {
+      const bounds = L.latLngBounds(allPoints);
+      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 14 });
+    }
+  }, [points, gateways, map]);
+  
+  return null;
+}
+
 export default function Dashboard() {
   const { theme } = useTheme();
   const [stats, setStats] = useState({
