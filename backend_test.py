@@ -401,6 +401,282 @@ class LoRaWANAPITester:
             self.log_test("Reset SF History - All fields present", True)
         return success
 
+    def test_noc_alerts_endpoint(self):
+        """Test NOC alerts endpoint"""
+        success, response = self.run_test("NOC Alerts", "GET", "alerts", 200)
+        if success:
+            required_fields = ['alerts', 'total', 'critical', 'warning']
+            for field in required_fields:
+                if field not in response:
+                    self.log_test(f"NOC Alerts - {field} field", False, f"Missing field: {field}")
+                    return False
+            
+            if isinstance(response['alerts'], list):
+                self.log_test("NOC Alerts - Alerts is list", True)
+            else:
+                self.log_test("NOC Alerts - Alerts is list", False, "Alerts field is not a list")
+            
+            # Check alert structure if alerts exist
+            if len(response['alerts']) > 0:
+                alert = response['alerts'][0]
+                alert_fields = ['type', 'severity', 'dev_eui', 'device_name', 'message']
+                for field in alert_fields:
+                    if field not in alert:
+                        self.log_test(f"NOC Alerts - Alert {field} field", False, f"Missing field: {field}")
+                        return False
+                self.log_test("NOC Alerts - Alert structure valid", True)
+            
+            self.log_test("NOC Alerts - All fields present", True)
+        return success
+
+    def test_sf_distribution_endpoint(self):
+        """Test SF distribution analytics endpoint"""
+        success, response = self.run_test("SF Distribution Analytics", "GET", "analytics/sf-distribution", 200)
+        if success:
+            required_fields = ['distribution', 'total_uplinks']
+            for field in required_fields:
+                if field not in response:
+                    self.log_test(f"SF Distribution - {field} field", False, f"Missing field: {field}")
+                    return False
+            
+            if isinstance(response['distribution'], list):
+                self.log_test("SF Distribution - Distribution is list", True)
+            else:
+                self.log_test("SF Distribution - Distribution is list", False, "Distribution field is not a list")
+            
+            # Check distribution structure if data exists
+            if len(response['distribution']) > 0:
+                dist = response['distribution'][0]
+                dist_fields = ['sf', 'count', 'percentage']
+                for field in dist_fields:
+                    if field not in dist:
+                        self.log_test(f"SF Distribution - {field} field", False, f"Missing field: {field}")
+                        return False
+                self.log_test("SF Distribution - Distribution structure valid", True)
+            
+            self.log_test("SF Distribution - All fields present", True)
+        return success
+
+    def test_top_problematic_endpoint(self):
+        """Test top problematic nodes endpoint"""
+        # Test packet_loss metric
+        success, response = self.run_test("Top Problematic (Packet Loss)", "GET", "analytics/top-problematic?metric=packet_loss", 200)
+        if success:
+            required_fields = ['nodes', 'metric', 'label']
+            for field in required_fields:
+                if field not in response:
+                    self.log_test(f"Top Problematic PL - {field} field", False, f"Missing field: {field}")
+                    return False
+            
+            if isinstance(response['nodes'], list):
+                self.log_test("Top Problematic PL - Nodes is list", True)
+            else:
+                self.log_test("Top Problematic PL - Nodes is list", False, "Nodes field is not a list")
+        
+        # Test SNR metric
+        success2, response2 = self.run_test("Top Problematic (SNR)", "GET", "analytics/top-problematic?metric=snr", 200)
+        if success2:
+            if isinstance(response2['nodes'], list):
+                self.log_test("Top Problematic SNR - Nodes is list", True)
+            else:
+                self.log_test("Top Problematic SNR - Nodes is list", False, "Nodes field is not a list")
+        
+        return success and success2
+
+    def test_rf_quality_endpoint(self):
+        """Test RF quality endpoint for specific device"""
+        # First get a device to test with
+        success, devices = self.run_test("Get Devices for RF Quality", "GET", "devices", 200)
+        if not success or not devices:
+            self.log_test("RF Quality Test - No devices", False, "Need devices for RF quality test")
+            return False
+        
+        dev_eui = devices[0]['dev_eui']
+        success, response = self.run_test("RF Quality Analytics", "GET", f"analytics/rf-quality/{dev_eui}?days=7", 200)
+        if success:
+            required_fields = ['dev_eui', 'device_name', 'uplinks']
+            for field in required_fields:
+                if field not in response:
+                    self.log_test(f"RF Quality - {field} field", False, f"Missing field: {field}")
+                    return False
+            
+            if isinstance(response['uplinks'], list):
+                self.log_test("RF Quality - Uplinks is list", True)
+            else:
+                self.log_test("RF Quality - Uplinks is list", False, "Uplinks field is not a list")
+            
+            self.log_test("RF Quality - All fields present", True)
+        return success
+
+    def test_gateway_load_endpoint(self):
+        """Test gateway load analytics endpoint"""
+        success, response = self.run_test("Gateway Load Analytics", "GET", "analytics/gateway-load", 200)
+        if success:
+            required_fields = ['hourly_data', 'gateways']
+            for field in required_fields:
+                if field not in response:
+                    self.log_test(f"Gateway Load - {field} field", False, f"Missing field: {field}")
+                    return False
+            
+            if isinstance(response['hourly_data'], list):
+                self.log_test("Gateway Load - Hourly data is list", True)
+            else:
+                self.log_test("Gateway Load - Hourly data is list", False, "Hourly data field is not a list")
+            
+            if isinstance(response['gateways'], list):
+                self.log_test("Gateway Load - Gateways is list", True)
+            else:
+                self.log_test("Gateway Load - Gateways is list", False, "Gateways field is not a list")
+            
+            self.log_test("Gateway Load - All fields present", True)
+        return success
+
+    def test_device_list_endpoint(self):
+        """Test device list for analytics endpoint"""
+        success, response = self.run_test("Device List Analytics", "GET", "analytics/device-list", 200)
+        if success:
+            if isinstance(response, list):
+                self.log_test("Device List - Response is list", True)
+                
+                # Check device structure if devices exist
+                if len(response) > 0:
+                    device = response[0]
+                    required_fields = ['dev_eui', 'name']
+                    for field in required_fields:
+                        if field not in device:
+                            self.log_test(f"Device List - {field} field", False, f"Missing field: {field}")
+                            return False
+                    self.log_test("Device List - Device structure valid", True)
+            else:
+                self.log_test("Device List - Response is list", False, "Response is not a list")
+        return success
+
+    def test_webhook_fcnt_battery(self):
+        """Test webhook with fCnt and battery processing"""
+        # First ensure we have a device to test with
+        success, devices = self.run_test("Get Devices for Webhook fCnt Test", "GET", "devices", 200)
+        if not success or not devices:
+            self.log_test("Webhook fCnt Test - No devices", False, "Need devices for webhook test")
+            return False
+
+        dev_eui = "0011223344556601"  # Use specific device from review request
+        
+        # Test webhook payload with fCnt and battery
+        webhook_payload = {
+            "devEui": dev_eui,
+            "deviceName": "Sensor Piata Universitatii",
+            "spreadingFactor": 8,
+            "fCnt": 100,
+            "object": {"battery": 85.5},
+            "rxInfo": [{"gatewayId": "AA00BB11CC22DD33", "rssi": -70, "snr": 9.0}]
+        }
+        
+        success, response = self.run_test("Webhook with fCnt & Battery", "POST", "chirpstack/webhook", 200, webhook_payload)
+        if success:
+            # Check response contains fCnt and battery info
+            if 'fcnt' in response and response['fcnt'] == 100:
+                self.log_test("Webhook fCnt - Extracted correctly", True)
+            else:
+                self.log_test("Webhook fCnt - Extracted correctly", False, f"fCnt not extracted: {response.get('fcnt')}")
+            
+            if 'battery_level' in response and response['battery_level'] == 85.5:
+                self.log_test("Webhook Battery - Extracted correctly", True)
+            else:
+                self.log_test("Webhook Battery - Extracted correctly", False, f"Battery not extracted: {response.get('battery_level')}")
+        
+        # Verify device has updated fCnt and battery
+        time.sleep(1)  # Small delay
+        success2, updated_devices = self.run_test("Get Devices after fCnt Update", "GET", "devices", 200)
+        if success2:
+            # Find our test device
+            test_device = None
+            for device in updated_devices:
+                if device['dev_eui'] == dev_eui:
+                    test_device = device
+                    break
+            
+            if test_device:
+                if test_device.get('last_fcnt') == 100:
+                    self.log_test("Device fCnt - Updated correctly", True)
+                else:
+                    self.log_test("Device fCnt - Updated correctly", False, f"Device fCnt: {test_device.get('last_fcnt')}")
+                
+                if test_device.get('battery_level') == 85.5:
+                    self.log_test("Device Battery - Updated correctly", True)
+                else:
+                    self.log_test("Device Battery - Updated correctly", False, f"Device battery: {test_device.get('battery_level')}")
+            else:
+                self.log_test("Device fCnt/Battery Update", False, f"Device {dev_eui} not found")
+        
+        return success
+
+    def test_packet_loss_detection(self):
+        """Test packet loss detection with fCnt gap"""
+        dev_eui = "0011223344556601"  # Use same device as previous test
+        
+        # Send webhook with gap in fCnt (100 -> 105, gap of 4 packets)
+        webhook_payload = {
+            "devEui": dev_eui,
+            "spreadingFactor": 7,
+            "fCnt": 105,
+            "object": {"battery": 82.0},
+            "rxInfo": [{"gatewayId": "AA00BB11CC22DD33", "rssi": -72, "snr": 8.5}]
+        }
+        
+        success, response = self.run_test("Webhook Packet Loss Detection", "POST", "chirpstack/webhook", 200, webhook_payload)
+        if success:
+            if 'packets_lost' in response and response['packets_lost'] == 4:
+                self.log_test("Packet Loss - Detected correctly", True)
+            else:
+                self.log_test("Packet Loss - Detected correctly", False, f"Expected 4 lost packets, got: {response.get('packets_lost')}")
+        
+        # Verify device has updated packet loss counters
+        time.sleep(1)  # Small delay
+        success2, updated_devices = self.run_test("Get Devices after Packet Loss", "GET", "devices", 200)
+        if success2:
+            # Find our test device
+            test_device = None
+            for device in updated_devices:
+                if device['dev_eui'] == dev_eui:
+                    test_device = device
+                    break
+            
+            if test_device:
+                if test_device.get('packets_lost', 0) >= 4:
+                    self.log_test("Device Packets Lost - Updated correctly", True)
+                else:
+                    self.log_test("Device Packets Lost - Updated correctly", False, f"Device packets_lost: {test_device.get('packets_lost')}")
+                
+                if test_device.get('consecutive_lost', 0) == 4:
+                    self.log_test("Device Consecutive Lost - Updated correctly", True)
+                else:
+                    self.log_test("Device Consecutive Lost - Updated correctly", False, f"Device consecutive_lost: {test_device.get('consecutive_lost')}")
+            else:
+                self.log_test("Device Packet Loss Update", False, f"Device {dev_eui} not found")
+        
+        return success
+
+    def test_heatmap_noc_fields(self):
+        """Test heatmap includes NOC fields (battery_level, packets_lost, consecutive_lost)"""
+        success, heatmap_data = self.run_test("Heatmap NOC Fields", "GET", "heatmap", 200)
+        if success and isinstance(heatmap_data, list):
+            if len(heatmap_data) > 0:
+                point = heatmap_data[0]
+                noc_fields = ['battery_level', 'packets_lost', 'consecutive_lost']
+                for field in noc_fields:
+                    if field in point:
+                        self.log_test(f"Heatmap NOC - {field} field present", True)
+                    else:
+                        self.log_test(f"Heatmap NOC - {field} field present", False, f"Missing NOC field: {field}")
+                        success = False
+                
+                if success:
+                    self.log_test("Heatmap NOC - All NOC fields present", True)
+            else:
+                self.log_test("Heatmap NOC Fields", False, "No heatmap data to verify NOC fields")
+                success = False
+        return success
+
     def run_all_tests(self):
         """Run all API tests"""
         print("🚀 Starting LoRaWAN API Tests...")
@@ -431,6 +707,21 @@ class LoRaWANAPITester:
         # Test SF management endpoints
         self.test_recalculate_sf_endpoint()
         self.test_reset_sf_history_endpoint()
+
+        # Test NOC Analytics Endpoints
+        print("\n🔍 Testing NOC Analytics Endpoints...")
+        self.test_noc_alerts_endpoint()
+        self.test_sf_distribution_endpoint()
+        self.test_top_problematic_endpoint()
+        self.test_rf_quality_endpoint()
+        self.test_gateway_load_endpoint()
+        self.test_device_list_endpoint()
+        
+        # Test enhanced webhook with NOC features
+        print("\n🔋 Testing Enhanced Webhook with NOC Features...")
+        self.test_webhook_fcnt_battery()
+        self.test_packet_loss_detection()
+        self.test_heatmap_noc_fields()
 
         # Print summary
         print("=" * 50)

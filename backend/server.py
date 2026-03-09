@@ -8,7 +8,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import csv
 import io
 
@@ -59,6 +59,11 @@ class Device(BaseModel):
     last_sf: Optional[int] = None
     sf_buffer: List[int] = Field(default_factory=list)  # Buffer of last 10 SF values
     sf_average: Optional[float] = None  # Calculated average of SF buffer
+    # NOC Fields
+    last_fcnt: Optional[int] = None  # Last frame counter received
+    packets_lost: int = 0  # Total packets lost (cumulative)
+    consecutive_lost: int = 0  # Consecutive packets lost (resets on successful reception)
+    battery_level: Optional[float] = None  # Battery percentage (0-100) or voltage
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 class DeviceCreate(BaseModel):
@@ -79,6 +84,10 @@ class UplinkLog(BaseModel):
     rssi: int
     snr: float
     spreading_factor: int
+    # NOC Fields
+    fcnt: Optional[int] = None  # Frame counter from ChirpStack
+    battery_level: Optional[float] = None  # Battery level at time of uplink
+    packets_lost: int = 0  # Packets lost detected at this uplink
     timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 class StatsResponse(BaseModel):
@@ -374,6 +383,7 @@ async def chirpstack_webhook(payload: dict):
     """
     Process ChirpStack UplinkEvent webhook
     Updates device's SF buffer (FIFO, max 10 values) and recalculates average
+    Extracts fCnt for packet loss detection and battery level
     Matches device by DevEUI (primary) or by Name (secondary)
     """
     try:
@@ -382,6 +392,54 @@ async def chirpstack_webhook(payload: dict):
         
         # NORMALIZE DevEUI to UPPERCASE for consistent matching
         dev_eui = raw_dev_eui.upper().strip()
+        
+        # ===== EXTRACT fCnt (Frame Counter) =====
+        fcnt = None
+        try:
+            fcnt = payload.get("fCnt") or payload.get("fCntUp")
+            if fcnt is None:
+                device_info = payload.get("deviceInfo", {})
+                fcnt = device_info.get("fCnt") or device_info.get("fCntUp")
+            if fcnt is not None:
+                fcnt = int(fcnt)
+                logger.info(f"fCnt extracted: {fcnt}")
+        except (ValueError, TypeError) as e:
+            logger.warning(f"Could not extract fCnt: {e}")
+            fcnt = None
+        
+        # ===== EXTRACT Battery Level =====
+        battery_level = None
+        try:
+            # Method 1: From decoded 'object' field (application-level decoded payload)
+            obj = payload.get("object") or payload.get("data") or {}
+            if isinstance(obj, dict):
+                battery_level = obj.get("battery") or obj.get("batteryLevel") or obj.get("battery_level") or obj.get("batt") or obj.get("vBat")
+            
+            # Method 2: From deviceStatus (MAC layer battery status)
+            if battery_level is None:
+                device_status = payload.get("deviceStatus") or payload.get("deviceInfo", {}).get("deviceStatus", {})
+                if isinstance(device_status, dict):
+                    bat_raw = device_status.get("batteryLevel") or device_status.get("battery")
+                    if bat_raw is not None:
+                        battery_level = float(bat_raw)
+                        # ChirpStack battery is 0-254 (0=external, 1-254 mapped, 255=unable)
+                        if battery_level > 100:
+                            battery_level = round((battery_level / 254.0) * 100, 1)
+            
+            # Method 3: From root-level battery field
+            if battery_level is None:
+                bat_root = payload.get("battery") or payload.get("batteryLevel")
+                if bat_root is not None:
+                    battery_level = float(bat_root)
+                    if battery_level > 100:
+                        battery_level = round((battery_level / 254.0) * 100, 1)
+            
+            if battery_level is not None:
+                battery_level = round(float(battery_level), 1)
+                logger.info(f"Battery level extracted: {battery_level}%")
+        except (ValueError, TypeError) as e:
+            logger.warning(f"Could not extract battery level: {e}")
+            battery_level = None
         
         # Extract spreading factor - check multiple locations
         spreading_factor = None
@@ -458,6 +516,20 @@ async def chirpstack_webhook(payload: dict):
         device_name = device.get("name") if device else device_name_from_payload or None
         device_registered = device is not None
         
+        # ===== CALCULATE PACKET LOSS (fCnt gap) =====
+        lost_packets = 0
+        if device and fcnt is not None:
+            last_fcnt = device.get("last_fcnt")
+            if last_fcnt is not None:
+                expected_fcnt = last_fcnt + 1
+                if fcnt > expected_fcnt:
+                    lost_packets = fcnt - expected_fcnt
+                    logger.warning(f"Packet loss detected for {dev_eui}: expected fCnt={expected_fcnt}, got={fcnt}, lost={lost_packets}")
+                elif fcnt < last_fcnt:
+                    # Counter reset (device reboot) - no loss counted
+                    logger.info(f"fCnt reset detected for {dev_eui}: last={last_fcnt}, current={fcnt}")
+                    lost_packets = 0
+        
         # Create uplink logs for each gateway
         created_logs = []
         for rx_info in rx_info_list:
@@ -487,13 +559,16 @@ async def chirpstack_webhook(payload: dict):
                 gateway_registered=gateway_registered,
                 rssi=int(rssi),
                 snr=float(snr),
-                spreading_factor=spreading_factor
+                spreading_factor=spreading_factor,
+                fcnt=fcnt,
+                battery_level=battery_level,
+                packets_lost=lost_packets
             )
             
             await db.uplinks.insert_one(uplink.model_dump())
             created_logs.append(uplink)
         
-        # Update device's SF buffer (FIFO) and recalculate average
+        # Update device's SF buffer (FIFO), packet loss, battery and recalculate average
         if device:
             sf_buffer = device.get("sf_buffer", [])
             
@@ -507,21 +582,43 @@ async def chirpstack_webhook(payload: dict):
             # Calculate new average
             sf_average = calculate_sf_average(sf_buffer)
             
+            # Build update dict
+            update_fields = {
+                "last_seen": datetime.now(timezone.utc).isoformat(),
+                "last_sf": spreading_factor,
+                "sf_buffer": sf_buffer,
+                "sf_average": sf_average
+            }
+            
+            # Update fCnt
+            if fcnt is not None:
+                update_fields["last_fcnt"] = fcnt
+            
+            # Update packet loss counters
+            if lost_packets > 0:
+                update_fields["packets_lost"] = device.get("packets_lost", 0) + lost_packets
+                update_fields["consecutive_lost"] = device.get("consecutive_lost", 0) + lost_packets
+            else:
+                # Reset consecutive counter on successful reception
+                update_fields["consecutive_lost"] = 0
+            
+            # Update battery level
+            if battery_level is not None:
+                update_fields["battery_level"] = battery_level
+            
             await db.devices.update_one(
                 {"dev_eui": dev_eui},
-                {"$set": {
-                    "last_seen": datetime.now(timezone.utc).isoformat(),
-                    "last_sf": spreading_factor,
-                    "sf_buffer": sf_buffer,
-                    "sf_average": sf_average
-                }}
+                {"$set": update_fields}
             )
         
         return {
             "status": "success",
             "message": f"Processed uplink from {dev_eui}",
             "logs_created": len(created_logs),
-            "sf_buffer_size": len(device.get("sf_buffer", [])) + 1 if device else 0
+            "sf_buffer_size": len(device.get("sf_buffer", [])) + 1 if device else 0,
+            "fcnt": fcnt,
+            "packets_lost": lost_packets,
+            "battery_level": battery_level
         }
         
     except Exception as e:
@@ -634,10 +731,296 @@ async def get_heatmap_data(
             "color_category": color_category,
             "last_seen": device.get("last_seen"),
             "rssi": latest_uplink.get("rssi") if latest_uplink else None,
-            "snr": latest_uplink.get("snr") if latest_uplink else None
+            "snr": latest_uplink.get("snr") if latest_uplink else None,
+            # NOC fields
+            "battery_level": device.get("battery_level"),
+            "packets_lost": device.get("packets_lost", 0),
+            "consecutive_lost": device.get("consecutive_lost", 0),
         })
     
     return heatmap_points
+
+# ==================== NOC ANALYTICS ENDPOINTS ====================
+
+@api_router.get("/alerts")
+async def get_alerts():
+    """
+    Get active NOC alerts:
+    - Packet loss: devices with consecutive_lost > 3
+    - Low battery: devices with battery_level < 20%
+    - Offline: devices not seen for > 24 hours
+    """
+    now = datetime.now(timezone.utc)
+    threshold_24h = (now - timedelta(hours=24)).isoformat()
+    
+    devices = await db.devices.find({}, {"_id": 0}).to_list(10000)
+    
+    alerts = []
+    
+    for device in devices:
+        # Packet loss alert: consecutive_lost > 3
+        consecutive_lost = device.get("consecutive_lost", 0)
+        if consecutive_lost > 3:
+            alerts.append({
+                "type": "packet_loss",
+                "severity": "critical" if consecutive_lost > 10 else "warning",
+                "dev_eui": device["dev_eui"],
+                "device_name": device.get("name", "Unknown"),
+                "message": f"{consecutive_lost} pachete consecutive pierdute",
+                "value": consecutive_lost,
+                "timestamp": device.get("last_seen")
+            })
+        
+        # Low battery alert: battery_level < 20%
+        battery_level = device.get("battery_level")
+        if battery_level is not None and battery_level < 20:
+            alerts.append({
+                "type": "low_battery",
+                "severity": "critical" if battery_level < 10 else "warning",
+                "dev_eui": device["dev_eui"],
+                "device_name": device.get("name", "Unknown"),
+                "message": f"Baterie scăzută: {battery_level}%",
+                "value": battery_level,
+                "timestamp": device.get("last_seen")
+            })
+        
+        # Offline alert: not seen for > 24 hours
+        last_seen = device.get("last_seen")
+        if last_seen and last_seen < threshold_24h:
+            alerts.append({
+                "type": "offline",
+                "severity": "warning",
+                "dev_eui": device["dev_eui"],
+                "device_name": device.get("name", "Unknown"),
+                "message": f"Dispozitiv offline de peste 24 ore",
+                "value": last_seen,
+                "timestamp": last_seen
+            })
+    
+    # Sort by severity (critical first), then by type
+    severity_order = {"critical": 0, "warning": 1, "info": 2}
+    alerts.sort(key=lambda a: (severity_order.get(a["severity"], 99), a["type"]))
+    
+    return {
+        "alerts": alerts,
+        "total": len(alerts),
+        "critical": sum(1 for a in alerts if a["severity"] == "critical"),
+        "warning": sum(1 for a in alerts if a["severity"] == "warning")
+    }
+
+
+@api_router.get("/analytics/sf-distribution")
+async def get_sf_distribution():
+    """
+    SF Distribution across the entire network.
+    Returns percentage for each SF (7-12).
+    Used for Pie/Donut chart.
+    """
+    pipeline = [
+        {"$group": {
+            "_id": "$spreading_factor",
+            "count": {"$sum": 1}
+        }},
+        {"$sort": {"_id": 1}}
+    ]
+    
+    results = await db.uplinks.aggregate(pipeline).to_list(20)
+    
+    total = sum(r["count"] for r in results)
+    distribution = []
+    
+    for r in results:
+        sf = r["_id"]
+        count = r["count"]
+        percentage = round((count / total * 100), 1) if total > 0 else 0
+        distribution.append({
+            "sf": f"SF{sf}" if sf else "Unknown",
+            "sf_value": sf,
+            "count": count,
+            "percentage": percentage
+        })
+    
+    return {
+        "distribution": distribution,
+        "total_uplinks": total
+    }
+
+
+@api_router.get("/analytics/top-problematic")
+async def get_top_problematic(metric: str = "packet_loss", limit: int = 10):
+    """
+    Top N nodes with problems.
+    Metrics: 'packet_loss' (most lost packets) or 'snr' (lowest average SNR).
+    Used for Bar chart.
+    """
+    if metric == "snr":
+        # Aggregate average SNR per device from uplinks
+        pipeline = [
+            {"$group": {
+                "_id": "$dev_eui",
+                "device_name": {"$first": "$device_name"},
+                "avg_snr": {"$avg": "$snr"},
+                "avg_rssi": {"$avg": "$rssi"},
+                "uplink_count": {"$sum": 1}
+            }},
+            {"$sort": {"avg_snr": 1}},  # Worst SNR first
+            {"$limit": limit}
+        ]
+        results = await db.uplinks.aggregate(pipeline).to_list(limit)
+        
+        nodes = []
+        for r in results:
+            nodes.append({
+                "dev_eui": r["_id"],
+                "device_name": r.get("device_name") or r["_id"],
+                "value": round(r["avg_snr"], 2),
+                "metric_label": "SNR Mediu (dB)",
+                "avg_rssi": round(r.get("avg_rssi", 0), 1),
+                "uplink_count": r["uplink_count"]
+            })
+        
+        return {"nodes": nodes, "metric": "snr", "label": "Top Noduri cu SNR Scăzut"}
+    
+    else:
+        # packet_loss: get from devices collection
+        devices = await db.devices.find(
+            {"packets_lost": {"$gt": 0}},
+            {"_id": 0}
+        ).sort("packets_lost", -1).to_list(limit)
+        
+        # If no packet loss data, fallback to aggregating from uplinks
+        if not devices:
+            pipeline = [
+                {"$match": {"packets_lost": {"$gt": 0}}},
+                {"$group": {
+                    "_id": "$dev_eui",
+                    "device_name": {"$first": "$device_name"},
+                    "total_lost": {"$sum": "$packets_lost"},
+                    "uplink_count": {"$sum": 1}
+                }},
+                {"$sort": {"total_lost": -1}},
+                {"$limit": limit}
+            ]
+            results = await db.uplinks.aggregate(pipeline).to_list(limit)
+            
+            nodes = []
+            for r in results:
+                nodes.append({
+                    "dev_eui": r["_id"],
+                    "device_name": r.get("device_name") or r["_id"],
+                    "value": r["total_lost"],
+                    "metric_label": "Pachete Pierdute",
+                    "uplink_count": r["uplink_count"]
+                })
+        else:
+            nodes = []
+            for d in devices:
+                nodes.append({
+                    "dev_eui": d["dev_eui"],
+                    "device_name": d.get("name", d["dev_eui"]),
+                    "value": d.get("packets_lost", 0),
+                    "metric_label": "Pachete Pierdute",
+                    "consecutive_lost": d.get("consecutive_lost", 0)
+                })
+        
+        return {"nodes": nodes, "metric": "packet_loss", "label": "Top Noduri cu Pachete Pierdute"}
+
+
+@api_router.get("/analytics/rf-quality/{dev_eui}")
+async def get_rf_quality(dev_eui: str, days: int = 7):
+    """
+    RF quality evolution (RSSI and SNR) for a specific device over the last N days.
+    Used for Line chart.
+    """
+    # Normalize DevEUI
+    dev_eui = dev_eui.upper().strip()
+    
+    start_date = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    
+    uplinks = await db.uplinks.find(
+        {"dev_eui": dev_eui, "timestamp": {"$gte": start_date}},
+        {"_id": 0, "rssi": 1, "snr": 1, "spreading_factor": 1, "timestamp": 1, "fcnt": 1}
+    ).sort("timestamp", 1).to_list(10000)
+    
+    # Get device info
+    device = await db.devices.find_one({"dev_eui": dev_eui}, {"_id": 0, "name": 1, "dev_eui": 1})
+    
+    return {
+        "dev_eui": dev_eui,
+        "device_name": device.get("name") if device else dev_eui,
+        "days": days,
+        "data_points": len(uplinks),
+        "uplinks": uplinks
+    }
+
+
+@api_router.get("/analytics/gateway-load")
+async def get_gateway_load(gateway_id: Optional[str] = None, hours: int = 24):
+    """
+    Gateway traffic load: uplinks per hour over the last N hours.
+    Used for Area/Bar chart to monitor duty cycle.
+    """
+    start_time = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    
+    match_stage = {"timestamp": {"$gte": start_time}}
+    if gateway_id:
+        match_stage["gateway_id"] = gateway_id
+    
+    # Aggregate uplinks per hour
+    pipeline = [
+        {"$match": match_stage},
+        {"$addFields": {
+            "hour_str": {"$substr": ["$timestamp", 0, 13]}  # Extract YYYY-MM-DDTHH
+        }},
+        {"$group": {
+            "_id": {
+                "hour": "$hour_str",
+                "gateway_id": "$gateway_id",
+                "gateway_name": "$gateway_name"
+            },
+            "count": {"$sum": 1},
+            "avg_rssi": {"$avg": "$rssi"},
+            "avg_snr": {"$avg": "$snr"}
+        }},
+        {"$sort": {"_id.hour": 1}}
+    ]
+    
+    results = await db.uplinks.aggregate(pipeline).to_list(1000)
+    
+    # Format results
+    hourly_data = []
+    for r in results:
+        hourly_data.append({
+            "hour": r["_id"]["hour"],
+            "gateway_id": r["_id"].get("gateway_id", ""),
+            "gateway_name": r["_id"].get("gateway_name", "Unknown"),
+            "count": r["count"],
+            "avg_rssi": round(r.get("avg_rssi", 0), 1),
+            "avg_snr": round(r.get("avg_snr", 0), 1)
+        })
+    
+    # Also get available gateways for dropdown
+    gateways = await db.gateways.find({}, {"_id": 0, "id": 1, "name": 1, "dev_eui": 1}).to_list(100)
+    
+    return {
+        "hourly_data": hourly_data,
+        "hours": hours,
+        "gateway_filter": gateway_id,
+        "gateways": gateways
+    }
+
+
+@api_router.get("/analytics/device-list")
+async def get_device_list_for_analytics():
+    """
+    Simple device list for analytics dropdowns.
+    """
+    devices = await db.devices.find(
+        {},
+        {"_id": 0, "dev_eui": 1, "name": 1, "last_seen": 1, "last_sf": 1, "battery_level": 1}
+    ).to_list(10000)
+    
+    return devices
 
 # ==================== SF RECALCULATION ====================
 

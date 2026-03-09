@@ -3,7 +3,7 @@ import "@/App.css";
 import { BrowserRouter, Routes, Route, NavLink, useLocation } from "react-router-dom";
 import axios from "axios";
 import { Toaster } from "@/components/ui/sonner";
-import { Radio, Router, Activity, List, Map, Sun, Moon, Zap } from "lucide-react";
+import { Radio, Router, Activity, List, Map, Sun, Moon, Zap, BarChart3 } from "lucide-react";
 import { ThemeProvider, useTheme } from "@/context/ThemeContext";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,6 +19,7 @@ import Gateways from "@/pages/Gateways";
 import Devices from "@/pages/Devices";
 import UplinkLogs from "@/pages/UplinkLogs";
 import LiveFeed from "@/pages/LiveFeed";
+import Analytics from "@/pages/Analytics";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -68,6 +69,7 @@ const Navigation = () => {
   const navItems = [
     { path: "/", icon: Map, label: "Harta SF" },
     { path: "/live", icon: Zap, label: "Live Feed" },
+    { path: "/analytics", icon: BarChart3, label: "Analytics" },
     { path: "/gateways", icon: Router, label: "Gateway-uri" },
     { path: "/devices", icon: Radio, label: "Dispozitive" },
     { path: "/logs", icon: List, label: "Istoric" },
@@ -145,6 +147,7 @@ function AppContent() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/live" element={<LiveFeed />} />
+            <Route path="/analytics" element={<Analytics />} />
             <Route path="/gateways" element={<Gateways />} />
             <Route path="/devices" element={<Devices />} />
             <Route path="/logs" element={<UplinkLogs />} />

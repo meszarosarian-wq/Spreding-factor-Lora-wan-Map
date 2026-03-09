@@ -21,6 +21,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useTheme } from "@/context/ThemeContext";
+import { Badge } from "@/components/ui/badge";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -39,19 +40,38 @@ const gatewayIcon = L.divIcon({
   iconAnchor: [12, 12],
 });
 
-// Get SF color based on AVERAGE spreading factor
-const getSFColor = (sfAvg) => {
+// Get SF color based on NOC rules:
+// GREEN: SF <= 9 (excellent signal)
+// ORANGE: SF = 10 (marginal signal)
+// RED: SF >= 11 or offline > 24h
+const getSFColor = (sfAvg, lastSeen) => {
+  // Check if offline > 24h
+  if (lastSeen) {
+    const lastSeenDate = new Date(lastSeen);
+    const now = new Date();
+    const hoursDiff = (now - lastSeenDate) / (1000 * 60 * 60);
+    if (hoursDiff > 24) return "#ef4444"; // RED - offline
+  }
+  
   if (sfAvg === null || sfAvg === undefined) return "#71717a";
-  if (sfAvg <= 8.5) return "#10b981";
-  if (sfAvg <= 10.5) return "#f59e0b";
-  return "#ef4444";
+  if (sfAvg <= 9) return "#10b981";     // GREEN
+  if (sfAvg <= 10) return "#f59e0b";    // ORANGE
+  return "#ef4444";                      // RED
 };
 
-const getSFLabel = (sfAvg) => {
+const getSFLabel = (sfAvg, lastSeen) => {
+  // Check if offline > 24h
+  if (lastSeen) {
+    const lastSeenDate = new Date(lastSeen);
+    const now = new Date();
+    const hoursDiff = (now - lastSeenDate) / (1000 * 60 * 60);
+    if (hoursDiff > 24) return "Offline >24h";
+  }
+  
   if (sfAvg === null || sfAvg === undefined) return "N/A";
-  if (sfAvg <= 8.5) return "Excelent";
-  if (sfAvg <= 10.5) return "Mediu";
-  return "Limită";
+  if (sfAvg <= 9) return "Excelent";
+  if (sfAvg <= 10) return "La limită";
+  return "Critic";
 };
 
 const getMarkerRadius = (sfAvg) => {
@@ -92,6 +112,7 @@ export default function Dashboard() {
   const [heatmapData, setHeatmapData] = useState([]);
   const [gateways, setGateways] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [alerts, setAlerts] = useState({ alerts: [], total: 0, critical: 0, warning: 0 });
   
   const [selectedGateway, setSelectedGateway] = useState("all");
   const [startDate, setStartDate] = useState(null);
@@ -116,15 +137,17 @@ export default function Dashboard() {
         params.append("end_date", endDate.toISOString());
       }
       
-      const [statsRes, heatmapRes, gatewaysRes] = await Promise.all([
+      const [statsRes, heatmapRes, gatewaysRes, alertsRes] = await Promise.all([
         axios.get(`${API}/stats`),
         axios.get(`${API}/heatmap?${params.toString()}`),
-        axios.get(`${API}/gateways`)
+        axios.get(`${API}/gateways`),
+        axios.get(`${API}/alerts`)
       ]);
       
       setStats(statsRes.data);
       setHeatmapData(heatmapRes.data);
       setGateways(gatewaysRes.data);
+      setAlerts(alertsRes.data);
     } catch (error) {
       console.error("Error fetching data:", error);
     } finally {
@@ -340,15 +363,15 @@ export default function Dashboard() {
             <div className={`sf-legend ${theme === "dark" ? "bg-zinc-900/90 border-zinc-800" : "bg-white border-slate-200"}`}>
               <div className="sf-legend-item">
                 <div className="sf-dot sf-dot-good"></div>
-                <span className={textSecondary}>≤8.5 Excelent</span>
+                <span className={textSecondary}>≤SF9 Excelent</span>
               </div>
               <div className="sf-legend-item">
                 <div className="sf-dot sf-dot-medium"></div>
-                <span className={textSecondary}>8.6-10.5 Mediu</span>
+                <span className={textSecondary}>SF10 La limită</span>
               </div>
               <div className="sf-legend-item">
                 <div className="sf-dot sf-dot-bad"></div>
-                <span className={textSecondary}>&gt;10.5 Limită</span>
+                <span className={textSecondary}>≥SF11 / Offline Critic</span>
               </div>
             </div>
           </div>
@@ -396,7 +419,7 @@ export default function Dashboard() {
 
               {heatmapData.map((point) => {
                 const sfValue = point.sf_average ?? point.spreading_factor;
-                const color = getSFColor(sfValue);
+                const color = getSFColor(sfValue, point.last_seen);
                 const radius = getMarkerRadius(sfValue);
                 
                 return (
@@ -419,12 +442,12 @@ export default function Dashboard() {
                           <div className="flex justify-between items-center mb-2">
                             <span className={`text-xs font-semibold ${textSecondary}`}>Media SF:</span>
                             <span className="font-mono font-bold text-lg" style={{ color }}>
-                              {sfValue !== null ? sfValue.toFixed(1) : "N/A"}
+                              {sfValue !== null && sfValue !== undefined ? sfValue.toFixed(1) : "N/A"}
                             </span>
                           </div>
                           <div className="flex justify-between text-xs">
                             <span className={textMuted}>Calitate:</span>
-                            <span style={{ color }}>{getSFLabel(sfValue)}</span>
+                            <span style={{ color }}>{getSFLabel(sfValue, point.last_seen)}</span>
                           </div>
                         </div>
                         
@@ -441,6 +464,20 @@ export default function Dashboard() {
                               <span className={`font-mono ${textSecondary}`}>{point.snr} dB</span>
                             </div>
                           )}
+                          {point.battery_level !== null && point.battery_level !== undefined && (
+                            <div className="flex justify-between text-xs">
+                              <span className={textSecondary}>Baterie:</span>
+                              <span className={`font-mono ${point.battery_level < 20 ? "text-red-500 font-bold" : textSecondary}`}>
+                                {point.battery_level}%
+                              </span>
+                            </div>
+                          )}
+                          {point.packets_lost > 0 && (
+                            <div className="flex justify-between text-xs">
+                              <span className={textSecondary}>Pachete pierdute:</span>
+                              <span className="font-mono text-red-500 font-bold">{point.packets_lost}</span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </Popup>
@@ -451,6 +488,42 @@ export default function Dashboard() {
           </div>
         </CardContent>
       </Card>
+
+      {/* NOC Alerts Panel */}
+      {alerts.total > 0 && (
+        <Card className={`${cardClass} border-l-4 ${alerts.critical > 0 ? "border-l-red-500" : "border-l-amber-500"}`} data-testid="alerts-panel">
+          <CardHeader className="pb-2">
+            <div className="flex items-center gap-2">
+              <CardTitle className={`text-base font-heading ${textPrimary} flex items-center gap-2`}>
+                ⚠️ Alerte NOC
+              </CardTitle>
+              <Badge variant="destructive" className="text-xs">
+                {alerts.critical > 0 ? `${alerts.critical} critice` : `${alerts.warning} avertismente`}
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+              {alerts.alerts.slice(0, 6).map((alert, idx) => (
+                <div
+                  key={idx}
+                  className={`flex items-center gap-2 p-2 rounded border text-xs ${
+                    alert.severity === "critical"
+                      ? "text-red-500 bg-red-500/10 border-red-500/30"
+                      : "text-amber-500 bg-amber-500/10 border-amber-500/30"
+                  }`}
+                >
+                  <span className="font-bold">{alert.type === "packet_loss" ? "📡" : alert.type === "low_battery" ? "🔋" : "📴"}</span>
+                  <div className="flex-1 min-w-0">
+                    <span className="font-semibold truncate block">{alert.device_name}</span>
+                    <span className="opacity-75 truncate block">{alert.message}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

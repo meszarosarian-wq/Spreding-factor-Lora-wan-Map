@@ -225,6 +225,36 @@ backend:
           agent: "testing"
           comment: "Both SF management endpoints working perfectly. Recalculate-sf processes all devices and recalculates SF buffers from uplink history. Reset-sf-history clears all SF data. Both return proper status responses. 6/6 SF management tests passed."
 
+  - task: "NOC Analytics Endpoints"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Added /api/alerts, /api/analytics/sf-distribution, /api/analytics/top-problematic, /api/analytics/rf-quality/{dev_eui}, /api/analytics/gateway-load, /api/analytics/device-list. Need testing."
+        - working: true
+          agent: "testing"
+          comment: "All NOC Analytics endpoints tested successfully. GET /api/alerts returns alerts object with alerts array, total, critical, warning counts. GET /api/analytics/sf-distribution returns distribution array with SF, count, percentage. GET /api/analytics/top-problematic works with both packet_loss and snr metrics. GET /api/analytics/rf-quality/{dev_eui} returns device uplinks data. GET /api/analytics/gateway-load returns hourly traffic data. GET /api/analytics/device-list returns device list with NOC fields. All endpoints return proper structure and data. 15/15 NOC analytics tests passed."
+
+  - task: "Webhook fCnt + Battery + Packet Loss"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Enhanced webhook to extract fCnt, battery, calculate packet loss. Updated Device and UplinkLog models. Need testing."
+        - working: true
+          agent: "testing"
+          comment: "Enhanced webhook functionality tested successfully. POST /api/chirpstack/webhook correctly extracts fCnt from payload and updates device.last_fcnt. Battery level extraction working from object.battery field and updates device.battery_level. Packet loss detection working - correctly detected 4 lost packets when fCnt gap from 100 to 105, updated both device.packets_lost and device.consecutive_lost counters. Heatmap endpoint confirmed to include all NOC fields: battery_level, packets_lost, consecutive_lost. 9/9 enhanced webhook tests passed."
+
 frontend:
   - task: "Dashboard with SF Heatmap"
     implemented: true
@@ -274,10 +304,34 @@ frontend:
           agent: "main"
           comment: "Devices page loads with CRUD, import CSV, export, SF buffer. Note: duplicate data visible."
 
+  - task: "Analytics Page with 4 Charts"
+    implemented: true
+    working: true
+    file: "frontend/src/pages/Analytics.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "New page with SF Distribution donut, Top 10 problematic bar, RF Quality line, Gateway Load area charts. Visually confirmed working."
+
+  - task: "Dashboard NOC Alerts + New Map Colors"
+    implemented: true
+    working: true
+    file: "frontend/src/pages/Dashboard.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "Added alerts panel, updated map (Green SF<=9, Orange SF=10, Red SF>=11/offline>24h), battery and packet loss in popups."
+
 metadata:
   created_by: "main_agent"
   version: "1.0"
-  test_sequence: 2
+  test_sequence: 3
   run_ui: false
 
 test_plan:
@@ -288,6 +342,6 @@ test_plan:
 
 agent_communication:
     - agent: "main"
-      message: "App was not running due to papaparse compilation error. Fixed by adding webpack alias to resolve non-minified version and adding stream fallback. All pages load visually. Now need backend API testing. Backend runs at localhost:8001 with /api prefix. MongoDB at localhost:27017, DB name test_database. Note: there appear to be duplicate entries in gateways and devices collections."
+      message: "Implemented all 4 NOC features. Backend has new endpoints: /api/alerts, /api/analytics/sf-distribution, /api/analytics/top-problematic, /api/analytics/rf-quality/{dev_eui}, /api/analytics/gateway-load. Webhook now extracts fCnt, battery_level, calculates packet loss. Frontend has new Analytics page with 4 Recharts graphs and Dashboard has alerts panel + new map colors. Please test the NEW endpoints focusing on: 1) analytics endpoints return correct data, 2) webhook with fCnt and battery payload correctly updates device, 3) packet loss detection works."
     - agent: "testing"
-      message: "Comprehensive backend API testing completed. Tested all 15+ endpoints including CRUD operations, webhook processing, heatmap data, stats, SF management, and CSV import. Results: 43/45 tests passed (95.6% success rate). All critical functionality working correctly. Only 2 minor timing/duplicate-related issues that don't affect core functionality. Backend is production-ready."
+      message: "TESTING COMPLETE: All NOC analytics endpoints working correctly. Tested 9 new endpoints/features: alerts (shows 1 packet loss warning), SF distribution (proper percentages), top problematic nodes (both packet_loss and SNR metrics), RF quality timeline, gateway load analytics, device list, enhanced webhook with fCnt=100 & battery=85.5% extraction, packet loss detection (4 packets gap detected correctly), heatmap NOC fields integration. All backend APIs returning proper JSON structure and data. Ready for production use."
