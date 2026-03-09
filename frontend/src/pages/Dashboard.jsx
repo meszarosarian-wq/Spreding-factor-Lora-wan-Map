@@ -144,6 +144,23 @@ export default function Dashboard() {
 
   const hasActiveFilters = selectedGateway !== "all" || startDate || endDate;
 
+  // Calculate map center dynamically based on data
+  const mapCenter = useMemo(() => {
+    const allPoints = [
+      ...heatmapData.map(p => ({ lat: p.latitude, lng: p.longitude })),
+      ...gateways.map(g => ({ lat: g.latitude, lng: g.longitude }))
+    ].filter(p => p.lat && p.lng);
+    
+    if (allPoints.length === 0) {
+      return [44.4268, 26.1025]; // Default to Bucharest
+    }
+    
+    const avgLat = allPoints.reduce((sum, p) => sum + p.lat, 0) / allPoints.length;
+    const avgLng = allPoints.reduce((sum, p) => sum + p.lng, 0) / allPoints.length;
+    
+    return [avgLat, avgLng];
+  }, [heatmapData, gateways]);
+
   // Dynamic classes based on theme
   const cardClass = theme === "dark" 
     ? "bg-zinc-900 border-zinc-800" 
