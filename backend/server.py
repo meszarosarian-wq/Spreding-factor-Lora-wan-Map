@@ -339,6 +339,18 @@ async def delete_device(device_id: str):
         raise HTTPException(status_code=404, detail="Device not found")
     return {"message": "Device deleted successfully"}
 
+@api_router.post("/devices/bulk-delete")
+async def bulk_delete_devices(device_ids: List[str]):
+    """Delete multiple devices at once by their IDs."""
+    if not device_ids:
+        raise HTTPException(status_code=400, detail="No device IDs provided")
+    
+    result = await db.devices.delete_many({"id": {"$in": device_ids}})
+    return {
+        "message": f"{result.deleted_count} dispozitive șterse",
+        "deleted_count": result.deleted_count
+    }
+
 @api_router.post("/devices/import-csv")
 async def import_devices_csv(file: UploadFile = File(...), group_id: Optional[str] = Form(None)):
     if not file.filename.endswith('.csv'):

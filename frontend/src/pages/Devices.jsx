@@ -29,8 +29,9 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, Radio, Upload, FileText, Download, Info, BarChart3, Search, ArrowUpDown, ArrowUp, ArrowDown, X, FileSpreadsheet } from "lucide-react";
+import { Plus, Pencil, Trash2, Radio, Upload, FileText, Download, Info, BarChart3, Search, ArrowUpDown, ArrowUp, ArrowDown, X, FileSpreadsheet, CheckSquare } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
+import { Checkbox } from "@/components/ui/checkbox";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -65,6 +66,10 @@ export default function Devices() {
   const [groups, setGroups] = useState([]);
   const fileInputRef = useRef(null);
 
+  // Bulk selection state
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
+
   // Search and Sort state
   const [searchTerm, setSearchTerm] = useState("");
   const [sortField, setSortField] = useState("name");
@@ -96,6 +101,37 @@ export default function Devices() {
   };
 
   useEffect(() => { fetchDevices(); }, []);
+
+  // Bulk selection helpers
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filteredDevices.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredDevices.map(d => d.id)));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    try {
+      const ids = Array.from(selectedIds);
+      const res = await axios.post(`${API}/devices/bulk-delete`, ids);
+      toast.success(res.data.message);
+      setSelectedIds(new Set());
+      setBulkDeleteDialogOpen(false);
+      fetchDevices();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Eroare la ștergerea în grup");
+    }
+  };
 
   // Filtered and sorted data
   const filteredDevices = useMemo(() => {
