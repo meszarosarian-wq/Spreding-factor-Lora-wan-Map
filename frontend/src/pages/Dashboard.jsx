@@ -356,16 +356,18 @@ export default function Dashboard() {
         <CardContent className="p-2">
           <div className="map-container" data-testid="coverage-map">
             <MapContainer
-              center={[44.4268, 26.1025]}
+              center={mapCenter}
               zoom={12}
               style={{ height: "100%", width: "100%" }}
               zoomControl={true}
-              key={theme}
+              key={`${theme}-${mapCenter[0].toFixed(2)}-${mapCenter[1].toFixed(2)}`}
             >
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
                 url={theme === "dark" ? darkTileUrl : lightTileUrl}
               />
+              
+              <MapBoundsUpdater points={heatmapData} gateways={gateways} />
               
               {gateways.map((gateway) => (
                 <Marker
