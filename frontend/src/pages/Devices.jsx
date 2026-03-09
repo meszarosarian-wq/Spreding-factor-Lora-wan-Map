@@ -57,10 +57,12 @@ export default function Devices() {
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [bufferDialogOpen, setBufferDialogOpen] = useState(false);
   const [selectedDevice, setSelectedDevice] = useState(null);
-  const [formData, setFormData] = useState({ dev_eui: "", name: "", latitude: "", longitude: "" });
+  const [formData, setFormData] = useState({ dev_eui: "", name: "", latitude: "", longitude: "", group_id: "" });
   const [csvPreview, setCsvPreview] = useState([]);
   const [csvFile, setCsvFile] = useState(null);
   const [importing, setImporting] = useState(false);
+  const [csvGroupId, setCsvGroupId] = useState("");
+  const [groups, setGroups] = useState([]);
   const fileInputRef = useRef(null);
 
   // Search and Sort state
@@ -80,8 +82,12 @@ export default function Devices() {
   const fetchDevices = async () => {
     try {
       setLoading(true);
-      const response = await axios.get(`${API}/devices`);
-      setDevices(response.data);
+      const [devRes, grpRes] = await Promise.all([
+        axios.get(`${API}/devices`),
+        axios.get(`${API}/groups`)
+      ]);
+      setDevices(devRes.data);
+      setGroups(grpRes.data);
     } catch (error) {
       toast.error("Eroare la încărcarea dispozitivelor");
     } finally {
@@ -209,17 +215,17 @@ export default function Devices() {
   const handleOpenDialog = (device = null) => {
     if (device) {
       setSelectedDevice(device);
-      setFormData({ dev_eui: device.dev_eui, name: device.name, latitude: device.latitude.toString(), longitude: device.longitude.toString() });
+      setFormData({ dev_eui: device.dev_eui, name: device.name, latitude: device.latitude.toString(), longitude: device.longitude.toString(), group_id: device.group_id || "" });
     } else {
       setSelectedDevice(null);
-      setFormData({ dev_eui: "", name: "", latitude: "", longitude: "" });
+      setFormData({ dev_eui: "", name: "", latitude: "", longitude: "", group_id: "" });
     }
     setDialogOpen(true);
   };
 
   const handleSubmit = async () => {
     try {
-      const payload = { dev_eui: formData.dev_eui, name: formData.name, latitude: parseFloat(formData.latitude), longitude: parseFloat(formData.longitude) };
+      const payload = { dev_eui: formData.dev_eui, name: formData.name, latitude: parseFloat(formData.latitude), longitude: parseFloat(formData.longitude), group_id: formData.group_id || null };
       if (selectedDevice) {
         await axios.put(`${API}/devices/${selectedDevice.id}`, payload);
         toast.success("Dispozitiv actualizat");
@@ -262,15 +268,19 @@ export default function Devices() {
     if (!csvFile) return;
     try {
       setImporting(true);
-      const formData = new FormData();
-      formData.append('file', csvFile);
-      const response = await axios.post(`${API}/devices/import-csv`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const importFormData = new FormData();
+      importFormData.append('file', csvFile);
+      if (csvGroupId) {
+        importFormData.append('group_id', csvGroupId);
+      }
+      const response = await axios.post(`${API}/devices/import-csv`, importFormData, { headers: { 'Content-Type': 'multipart/form-data' } });
       const { imported, skipped } = response.data;
       if (imported > 0) toast.success(`${imported} dispozitive importate`);
       if (skipped > 0) toast.warning(`${skipped} ignorate`);
       setImportDialogOpen(false);
       setCsvFile(null);
       setCsvPreview([]);
+      setCsvGroupId("");
       fetchDevices();
     } catch (error) {
       toast.error(error.response?.data?.detail || "Eroare import");
@@ -393,6 +403,7 @@ export default function Devices() {
                     </TableHead>
                     <TableHead className={`font-mono text-xs uppercase ${textMuted}`}>Lat</TableHead>
                     <TableHead className={`font-mono text-xs uppercase ${textMuted}`}>Lng</TableHead>
+                    <TableHead className={`font-mono text-xs uppercase ${textMuted}`}>Grup</TableHead>
                     <TableHead className={`font-mono text-xs uppercase ${textMuted} cursor-pointer hover:text-blue-500`} onClick={() => handleSort("sf_average")}>
                       <span className="flex items-center">SF Mediu<SortIcon field="sf_average" /></span>
                     </TableHead>
@@ -412,6 +423,13 @@ export default function Devices() {
                       <TableCell className={`font-mono text-xs ${textSecondary}`}>{device.dev_eui}</TableCell>
                       <TableCell className={`font-mono text-sm ${textSecondary}`}>{device.latitude.toFixed(4)}</TableCell>
                       <TableCell className={`font-mono text-sm ${textSecondary}`}>{device.longitude.toFixed(4)}</TableCell>
+                      <TableCell className={`text-xs ${textSecondary}`}>
+                        {device.group_name ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded bg-blue-500/15 text-blue-400 text-xs">{device.group_name}</span>
+                        ) : (
+                          <span className={textMuted}>—</span>
+                        )}
+                      </TableCell>
                       <TableCell>
                         <span className={`badge ${getSFBadgeClass(device.sf_average)}`}>
                           {device.sf_average !== null ? device.sf_average.toFixed(1) : "N/A"}
@@ -463,6 +481,20 @@ export default function Devices() {
                 <Input type="number" step="any" value={formData.longitude} onChange={(e) => setFormData({ ...formData, longitude: e.target.value })} className={`${inputClass} font-mono`} />
               </div>
             </div>
+            <div className="space-y-2">
+              <Label className={textSecondary}>Grup (opțional)</Label>
+              <Select value={formData.group_id || "none"} onValueChange={(val) => setFormData({ ...formData, group_id: val === "none" ? "" : val })}>
+                <SelectTrigger className={inputClass}>
+                  <SelectValue placeholder="Selectează grup" />
+                </SelectTrigger>
+                <SelectContent className={dialogClass}>
+                  <SelectItem value="none" className={textSecondary}>— Fără grup —</SelectItem>
+                  {groups.map(g => (
+                    <SelectItem key={g.id} value={g.id} className={textSecondary}>{g.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Anulează</Button>
@@ -491,7 +523,22 @@ export default function Devices() {
           <DialogHeader>
             <DialogTitle className={`font-heading ${textPrimary}`}><FileText className="w-5 h-5 inline mr-2 text-emerald-500" />Import CSV</DialogTitle>
           </DialogHeader>
-          <div className="py-4">
+          <div className="py-4 space-y-4">
+            <div className="space-y-2">
+              <Label className={textSecondary}>Asignare la Grup (opțional)</Label>
+              <Select value={csvGroupId || "none"} onValueChange={(val) => setCsvGroupId(val === "none" ? "" : val)}>
+                <SelectTrigger className={inputClass}>
+                  <SelectValue placeholder="Selectează grup" />
+                </SelectTrigger>
+                <SelectContent className={dialogClass}>
+                  <SelectItem value="none" className={textSecondary}>— Fără grup —</SelectItem>
+                  {groups.map(g => (
+                    <SelectItem key={g.id} value={g.id} className={textSecondary}>{g.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className={`text-xs ${textMuted}`}>Sau adaugă o coloană "group" în CSV</p>
+            </div>
             {csvPreview.length > 0 && (
               <div className={`overflow-x-auto border rounded ${theme === "dark" ? "border-zinc-800" : "border-slate-200"}`}>
                 <Table>

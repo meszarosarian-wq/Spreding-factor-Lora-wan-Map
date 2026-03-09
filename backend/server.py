@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File
+from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Form
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -48,6 +48,17 @@ class GatewayCreate(BaseModel):
     longitude: float
     status: str = "active"
 
+class DeviceGroup(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    description: Optional[str] = None
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+class DeviceGroupCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+
 class Device(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -63,6 +74,9 @@ class Device(BaseModel):
     last_fcnt: Optional[int] = None  # Last frame counter received
     packets_lost: int = 0  # Total packets lost (cumulative)
     consecutive_lost: int = 0  # Consecutive packets lost (resets on successful reception)
+    # Group Fields
+    group_id: Optional[str] = None
+    group_name: Optional[str] = None
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 class DeviceCreate(BaseModel):
@@ -70,6 +84,8 @@ class DeviceCreate(BaseModel):
     name: str
     latitude: float
     longitude: float
+    group_id: Optional[str] = None
+    group_name: Optional[str] = None
 
 class UplinkLog(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -87,6 +103,10 @@ class UplinkLog(BaseModel):
     fcnt: Optional[int] = None  # Frame counter from ChirpStack
     frequency: Optional[int] = None  # Frequency in Hz (e.g. 868100000)
     packets_lost: int = 0  # Packets lost detected at this uplink
+    # Group/Tenant Fields
+    group_id: Optional[str] = None
+    tenant_name: Optional[str] = None
+    application_name: Optional[str] = None
     timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 class StatsResponse(BaseModel):
@@ -165,11 +185,84 @@ async def delete_gateway(gateway_id: str):
         raise HTTPException(status_code=404, detail="Gateway not found")
     return {"message": "Gateway deleted successfully"}
 
+# ==================== GROUP ENDPOINTS ====================
+
+@api_router.get("/groups")
+async def get_groups():
+    groups = await db.groups.find({}, {"_id": 0}).to_list(1000)
+    return groups
+
+@api_router.post("/groups")
+async def create_group(group_data: DeviceGroupCreate):
+    # Check for unique name
+    existing = await db.groups.find_one({"name": group_data.name})
+    if existing:
+        raise HTTPException(status_code=400, detail=f"Group with name '{group_data.name}' already exists")
+    
+    group = DeviceGroup(**group_data.model_dump())
+    await db.groups.insert_one(group.model_dump())
+    return group.model_dump()
+
+@api_router.put("/groups/{group_id}")
+async def update_group(group_id: str, group_data: DeviceGroupCreate):
+    existing = await db.groups.find_one({"id": group_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Group not found")
+    
+    # Check name uniqueness (excluding current group)
+    name_conflict = await db.groups.find_one({"name": group_data.name, "id": {"$ne": group_id}})
+    if name_conflict:
+        raise HTTPException(status_code=400, detail=f"Group with name '{group_data.name}' already exists")
+    
+    update_dict = group_data.model_dump()
+    await db.groups.update_one({"id": group_id}, {"$set": update_dict})
+    
+    # Update group_name on all devices in this group
+    await db.devices.update_many(
+        {"group_id": group_id},
+        {"$set": {"group_name": group_data.name}}
+    )
+    
+    updated = await db.groups.find_one({"id": group_id}, {"_id": 0})
+    return updated
+
+@api_router.delete("/groups/{group_id}")
+async def delete_group(group_id: str):
+    existing = await db.groups.find_one({"id": group_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Group not found")
+    
+    # Unassign devices from this group (set to None, don't delete devices)
+    await db.devices.update_many(
+        {"group_id": group_id},
+        {"$set": {"group_id": None, "group_name": None}}
+    )
+    
+    await db.groups.delete_one({"id": group_id})
+    return {"message": "Group deleted successfully. Devices have been unassigned."}
+
+@api_router.post("/groups/{group_id}/assign-devices")
+async def assign_devices_to_group(group_id: str, device_ids: List[str]):
+    """Assign multiple devices to a group"""
+    group = await db.groups.find_one({"id": group_id})
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+    
+    result = await db.devices.update_many(
+        {"id": {"$in": device_ids}},
+        {"$set": {"group_id": group_id, "group_name": group["name"]}}
+    )
+    
+    return {"message": f"{result.modified_count} devices assigned to group '{group['name']}'"}
+
 # ==================== DEVICE ENDPOINTS ====================
 
 @api_router.get("/devices")
-async def get_devices():
-    devices = await db.devices.find({}, {"_id": 0}).to_list(1000)
+async def get_devices(group_id: Optional[str] = None):
+    query = {}
+    if group_id:
+        query["group_id"] = group_id
+    devices = await db.devices.find(query, {"_id": 0}).to_list(1000)
     # Ensure sf_buffer and sf_average are present
     for device in devices:
         if "sf_buffer" not in device:
@@ -199,11 +292,20 @@ async def create_device(data: DeviceCreate):
     if existing:
         raise HTTPException(status_code=400, detail="Device with this DevEUI already exists")
     
+    # Resolve group_name if group_id is provided
+    group_name = data.group_name
+    if data.group_id and not group_name:
+        group = await db.groups.find_one({"id": data.group_id})
+        if group:
+            group_name = group["name"]
+    
     device = Device(
         dev_eui=normalized_dev_eui,
         name=data.name,
         latitude=data.latitude,
-        longitude=data.longitude
+        longitude=data.longitude,
+        group_id=data.group_id,
+        group_name=group_name
     )
     doc = device.model_dump()
     await db.devices.insert_one(doc)
@@ -216,6 +318,16 @@ async def update_device(device_id: str, data: DeviceCreate):
         raise HTTPException(status_code=404, detail="Device not found")
     
     update_data = data.model_dump()
+    
+    # Resolve group_name if group_id changed
+    if data.group_id and not data.group_name:
+        group = await db.groups.find_one({"id": data.group_id})
+        if group:
+            update_data["group_name"] = group["name"]
+    elif not data.group_id:
+        update_data["group_id"] = None
+        update_data["group_name"] = None
+    
     await db.devices.update_one({"id": device_id}, {"$set": update_data})
     updated = await db.devices.find_one({"id": device_id}, {"_id": 0})
     return updated
@@ -228,9 +340,18 @@ async def delete_device(device_id: str):
     return {"message": "Device deleted successfully"}
 
 @api_router.post("/devices/import-csv")
-async def import_devices_csv(file: UploadFile = File(...)):
+async def import_devices_csv(file: UploadFile = File(...), group_id: Optional[str] = Form(None)):
     if not file.filename.endswith('.csv'):
         raise HTTPException(status_code=400, detail="File must be a CSV")
+    
+    # Resolve group_name if group_id provided via form
+    form_group_name = None
+    if group_id:
+        group = await db.groups.find_one({"id": group_id})
+        if group:
+            form_group_name = group["name"]
+        else:
+            raise HTTPException(status_code=404, detail=f"Group with id '{group_id}' not found")
     
     content = await file.read()
     decoded = content.decode('utf-8')
@@ -261,11 +382,32 @@ async def import_devices_csv(file: UploadFile = File(...)):
                 skipped += 1
                 continue
             
+            # Determine group: form-data group_id takes priority, then CSV column
+            row_group_id = group_id
+            row_group_name = form_group_name
+            
+            if not row_group_id:
+                csv_group = row.get('group') or row.get('tenant') or row.get('group_name') or row.get('Group')
+                if csv_group:
+                    # Try to find existing group by name
+                    found_group = await db.groups.find_one({"name": csv_group})
+                    if found_group:
+                        row_group_id = found_group["id"]
+                        row_group_name = found_group["name"]
+                    else:
+                        # Auto-create group from CSV column
+                        new_group = DeviceGroup(name=csv_group)
+                        await db.groups.insert_one(new_group.model_dump())
+                        row_group_id = new_group.id
+                        row_group_name = csv_group
+            
             device = Device(
                 dev_eui=normalized_dev_eui,
                 name=name,
                 latitude=float(latitude),
-                longitude=float(longitude)
+                longitude=float(longitude),
+                group_id=row_group_id,
+                group_name=row_group_name
             )
             await db.devices.insert_one(device.model_dump())
             imported += 1
@@ -277,7 +419,9 @@ async def import_devices_csv(file: UploadFile = File(...)):
     return {
         "imported": imported,
         "skipped": skipped,
-        "errors": errors[:10]
+        "errors": errors[:10],
+        "group_id": group_id,
+        "group_name": form_group_name
     }
 
 # ==================== UPLINK LOG ENDPOINTS ====================
@@ -288,6 +432,7 @@ async def get_uplinks(
     dev_eui: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    group_id: Optional[str] = None,
     limit: int = 100
 ):
     query = {}
@@ -302,6 +447,12 @@ async def get_uplinks(
             query["timestamp"]["$gte"] = start_date
         if end_date:
             query["timestamp"]["$lte"] = end_date
+    
+    # Filter by group: get device dev_euis belonging to the group
+    if group_id:
+        group_devices = await db.devices.find({"group_id": group_id}, {"dev_eui": 1}).to_list(10000)
+        group_dev_euis = [d["dev_eui"] for d in group_devices]
+        query["dev_eui"] = {"$in": group_dev_euis} if not dev_eui else dev_eui
     
     uplinks = await db.uplinks.find(query, {"_id": 0}).sort("timestamp", -1).to_list(limit)
     return uplinks
@@ -475,6 +626,11 @@ async def chirpstack_webhook(payload: dict):
                 "snr": payload.get("snr", 0)
             }]
         
+        # ===== EXTRACT Tenant and Application Names =====
+        device_info_payload = payload.get("deviceInfo", {})
+        tenant_name = device_info_payload.get("tenantName") or payload.get("tenantName")
+        application_name = device_info_payload.get("applicationName") or payload.get("applicationName")
+        
         # Find the device in our database:
         # 1. First try by DevEUI (normalized uppercase)
         device = await db.devices.find_one({"dev_eui": dev_eui})
@@ -541,7 +697,10 @@ async def chirpstack_webhook(payload: dict):
                 spreading_factor=spreading_factor,
                 fcnt=fcnt,
                 frequency=frequency,
-                packets_lost=lost_packets
+                packets_lost=lost_packets,
+                group_id=device.get("group_id") if device else None,
+                tenant_name=tenant_name,
+                application_name=application_name
             )
             
             await db.uplinks.insert_one(uplink.model_dump())
@@ -603,18 +762,33 @@ async def chirpstack_webhook(payload: dict):
 # ==================== STATS ENDPOINT ====================
 
 @api_router.get("/stats", response_model=StatsResponse)
-async def get_stats():
+async def get_stats(group_id: Optional[str] = None):
     total_gateways = await db.gateways.count_documents({})
-    total_devices = await db.devices.count_documents({})
-    total_uplinks = await db.uplinks.count_documents({})
+    
+    device_query = {}
+    if group_id:
+        device_query["group_id"] = group_id
+    
+    total_devices = await db.devices.count_documents(device_query)
+    
+    # Build uplink query based on group filter
+    uplink_query = {}
+    if group_id:
+        group_devices = await db.devices.find({"group_id": group_id}, {"dev_eui": 1}).to_list(10000)
+        group_dev_euis = [d["dev_eui"] for d in group_devices]
+        uplink_query["dev_eui"] = {"$in": group_dev_euis}
+    
+    total_uplinks = await db.uplinks.count_documents(uplink_query)
     
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
-    uplinks_today = await db.uplinks.count_documents({"timestamp": {"$gte": today_start}})
+    today_query = {**uplink_query, "timestamp": {"$gte": today_start}}
+    uplinks_today = await db.uplinks.count_documents(today_query)
     
-    pipeline = [
-        {"$group": {"_id": "$spreading_factor", "count": {"$sum": 1}}}
-    ]
-    sf_results = await db.uplinks.aggregate(pipeline).to_list(20)
+    sf_pipeline = []
+    if uplink_query:
+        sf_pipeline.append({"$match": uplink_query})
+    sf_pipeline.append({"$group": {"_id": "$spreading_factor", "count": {"$sum": 1}}})
+    sf_results = await db.uplinks.aggregate(sf_pipeline).to_list(20)
     sf_distribution = {str(r["_id"]): r["count"] for r in sf_results if r["_id"] is not None}
     
     return StatsResponse(
@@ -631,16 +805,18 @@ async def get_stats():
 async def get_heatmap_data(
     gateway_id: Optional[str] = None,
     start_date: Optional[str] = None,
-    end_date: Optional[str] = None
+    end_date: Optional[str] = None,
+    group_id: Optional[str] = None
 ):
     """
     Get device locations with their average SF values for heatmap visualization.
-    Uses sf_average (from buffer of last 10 values) for coloring:
-    - 7.0-8.5: Green (Good)
-    - 8.6-10.5: Orange (Medium)
-    - 10.6+: Red (Bad)
+    Supports group_id filter to show only devices from a specific group.
     """
-    devices = await db.devices.find({}, {"_id": 0}).to_list(1000)
+    device_query = {}
+    if group_id:
+        device_query["group_id"] = group_id
+    
+    devices = await db.devices.find(device_query, {"_id": 0}).to_list(1000)
     
     uplink_query = {}
     if gateway_id:
@@ -710,6 +886,9 @@ async def get_heatmap_data(
             # NOC fields
             "packets_lost": device.get("packets_lost", 0),
             "consecutive_lost": device.get("consecutive_lost", 0),
+            # Group fields
+            "group_id": device.get("group_id"),
+            "group_name": device.get("group_name"),
         })
     
     return heatmap_points
@@ -787,19 +966,26 @@ async def get_alerts():
 
 
 @api_router.get("/analytics/sf-distribution")
-async def get_sf_distribution():
+async def get_sf_distribution(group_id: Optional[str] = None):
     """
-    SF Distribution across the entire network.
-    Returns percentage for each SF (7-12).
-    Used for Pie/Donut chart.
+    SF Distribution across the network (or a specific group).
     """
-    pipeline = [
+    match_stage = {}
+    if group_id:
+        group_devices = await db.devices.find({"group_id": group_id}, {"dev_eui": 1}).to_list(10000)
+        group_dev_euis = [d["dev_eui"] for d in group_devices]
+        match_stage["dev_eui"] = {"$in": group_dev_euis}
+    
+    pipeline = []
+    if match_stage:
+        pipeline.append({"$match": match_stage})
+    pipeline.extend([
         {"$group": {
             "_id": "$spreading_factor",
             "count": {"$sum": 1}
         }},
         {"$sort": {"_id": 1}}
-    ]
+    ])
     
     results = await db.uplinks.aggregate(pipeline).to_list(20)
     
@@ -824,7 +1010,7 @@ async def get_sf_distribution():
 
 
 @api_router.get("/analytics/top-problematic")
-async def get_top_problematic(metric: str = "packet_loss", limit: int = 10):
+async def get_top_problematic(metric: str = "packet_loss", limit: int = 10, group_id: Optional[str] = None):
     """
     Top N nodes with problems.
     Metrics: 'packet_loss' (most lost packets) or 'snr' (lowest average SNR).
@@ -832,7 +1018,16 @@ async def get_top_problematic(metric: str = "packet_loss", limit: int = 10):
     """
     if metric == "snr":
         # Aggregate average SNR per device from uplinks
-        pipeline = [
+        match_stage = {}
+        if group_id:
+            group_devices = await db.devices.find({"group_id": group_id}, {"dev_eui": 1}).to_list(10000)
+            group_dev_euis = [d["dev_eui"] for d in group_devices]
+            match_stage["dev_eui"] = {"$in": group_dev_euis}
+        
+        pipeline = []
+        if match_stage:
+            pipeline.append({"$match": match_stage})
+        pipeline.extend([
             {"$group": {
                 "_id": "$dev_eui",
                 "device_name": {"$first": "$device_name"},
@@ -842,7 +1037,7 @@ async def get_top_problematic(metric: str = "packet_loss", limit: int = 10):
             }},
             {"$sort": {"avg_snr": 1}},  # Worst SNR first
             {"$limit": limit}
-        ]
+        ])
         results = await db.uplinks.aggregate(pipeline).to_list(limit)
         
         nodes = []
@@ -860,8 +1055,12 @@ async def get_top_problematic(metric: str = "packet_loss", limit: int = 10):
     
     else:
         # packet_loss: get from devices collection
+        device_query = {"packets_lost": {"$gt": 0}}
+        if group_id:
+            device_query["group_id"] = group_id
+        
         devices = await db.devices.find(
-            {"packets_lost": {"$gt": 0}},
+            device_query,
             {"_id": 0}
         ).sort("packets_lost", -1).to_list(limit)
         

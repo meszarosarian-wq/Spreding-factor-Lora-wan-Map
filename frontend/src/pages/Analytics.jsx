@@ -37,6 +37,8 @@ export default function Analytics() {
   const [selectedGateway, setSelectedGateway] = useState("all");
   const [problemMetric, setProblemMetric] = useState("packet_loss");
   const [deviceSearch, setDeviceSearch] = useState("");
+  const [selectedGroupFilter, setSelectedGroupFilter] = useState("all");
+  const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Theme-based colors
@@ -61,21 +63,24 @@ export default function Analytics() {
 
   const fetchSfDistribution = useCallback(async () => {
     try {
-      const res = await axios.get(`${API}/analytics/sf-distribution`);
+      const params = selectedGroupFilter && selectedGroupFilter !== "all" ? `?group_id=${selectedGroupFilter}` : "";
+      const res = await axios.get(`${API}/analytics/sf-distribution${params}`);
       setSfDistribution(res.data);
     } catch (e) {
       console.error("Error fetching SF distribution:", e);
     }
-  }, []);
+  }, [selectedGroupFilter]);
 
   const fetchTopProblematic = useCallback(async () => {
     try {
-      const res = await axios.get(`${API}/analytics/top-problematic?metric=${problemMetric}`);
+      let params = `?metric=${problemMetric}`;
+      if (selectedGroupFilter && selectedGroupFilter !== "all") params += `&group_id=${selectedGroupFilter}`;
+      const res = await axios.get(`${API}/analytics/top-problematic${params}`);
       setTopProblematic(res.data);
     } catch (e) {
       console.error("Error fetching top problematic:", e);
     }
-  }, [problemMetric]);
+  }, [problemMetric, selectedGroupFilter]);
 
   const fetchRfQuality = useCallback(async () => {
     if (!selectedDevice) return;
@@ -99,10 +104,14 @@ export default function Analytics() {
 
   const fetchDevices = useCallback(async () => {
     try {
-      const res = await axios.get(`${API}/analytics/device-list`);
-      setDevices(res.data);
-      if (res.data.length > 0 && !selectedDevice) {
-        setSelectedDevice(res.data[0].dev_eui);
+      const [devRes, grpRes] = await Promise.all([
+        axios.get(`${API}/analytics/device-list`),
+        axios.get(`${API}/groups`)
+      ]);
+      setDevices(devRes.data);
+      setGroups(grpRes.data);
+      if (devRes.data.length > 0 && !selectedDevice) {
+        setSelectedDevice(devRes.data[0].dev_eui);
       }
     } catch (e) {
       console.error("Error fetching device list:", e);
@@ -205,20 +214,33 @@ export default function Analytics() {
   return (
     <div className="space-y-4" data-testid="analytics-page">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <h1 className={`text-xl font-heading font-bold ${textPrimary}`}>
           <BarChart3 className="w-6 h-6 inline-block mr-2 text-blue-500" />
           NOC Analytics
         </h1>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={refreshAll}
-          className={textSecondary}
-        >
-          <RefreshCw className={`w-4 h-4 mr-1 ${loading ? 'animate-spin' : ''}`} />
-          Reîmprospătare
-        </Button>
+        <div className="flex items-center gap-2">
+          <Select value={selectedGroupFilter} onValueChange={setSelectedGroupFilter}>
+            <SelectTrigger className={`w-[180px] h-8 text-xs ${theme === "dark" ? "bg-zinc-950 border-zinc-800 text-zinc-300" : "bg-white border-slate-200 text-slate-700"}`}>
+              <SelectValue placeholder="Toate Grupurile" />
+            </SelectTrigger>
+            <SelectContent className={theme === "dark" ? "bg-zinc-900 border-zinc-800" : "bg-white border-slate-200"}>
+              <SelectItem value="all" className={textSecondary}>Toate Grupurile</SelectItem>
+              {groups.map(g => (
+                <SelectItem key={g.id} value={g.id} className={textSecondary}>{g.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={refreshAll}
+            className={textSecondary}
+          >
+            <RefreshCw className={`w-4 h-4 mr-1 ${loading ? 'animate-spin' : ''}`} />
+            Reîmprospătare
+          </Button>
+        </div>
       </div>
 
       {/* Alerts Panel */}

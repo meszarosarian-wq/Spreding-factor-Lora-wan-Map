@@ -121,6 +121,8 @@ export default function Dashboard() {
   const [endDate, setEndDate] = useState(null);
   const [showCriticalOnly, setShowCriticalOnly] = useState(false);
   const [showInactive, setShowInactive] = useState(false);
+  const [selectedGroup, setSelectedGroup] = useState("all");
+  const [groups, setGroups] = useState([]);
 
   // Map tile URLs
   const darkTileUrl = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
@@ -140,24 +142,34 @@ export default function Dashboard() {
       if (endDate) {
         params.append("end_date", endDate.toISOString());
       }
+      if (selectedGroup && selectedGroup !== "all") {
+        params.append("group_id", selectedGroup);
+      }
       
-      const [statsRes, heatmapRes, gatewaysRes, alertsRes] = await Promise.all([
-        axios.get(`${API}/stats`),
+      const statsParams = new URLSearchParams();
+      if (selectedGroup && selectedGroup !== "all") {
+        statsParams.append("group_id", selectedGroup);
+      }
+      
+      const [statsRes, heatmapRes, gatewaysRes, alertsRes, groupsRes] = await Promise.all([
+        axios.get(`${API}/stats?${statsParams.toString()}`),
         axios.get(`${API}/heatmap?${params.toString()}`),
         axios.get(`${API}/gateways`),
-        axios.get(`${API}/alerts`)
+        axios.get(`${API}/alerts`),
+        axios.get(`${API}/groups`)
       ]);
       
       setStats(statsRes.data);
       setHeatmapData(heatmapRes.data);
       setGateways(gatewaysRes.data);
       setAlerts(alertsRes.data);
+      setGroups(groupsRes.data);
     } catch (error) {
       console.error("Error fetching data:", error);
     } finally {
       setLoading(false);
     }
-  }, [selectedGateway, startDate, endDate]);
+  }, [selectedGateway, startDate, endDate, selectedGroup]);
 
   useEffect(() => {
     fetchData();
@@ -292,6 +304,23 @@ export default function Dashboard() {
                 {gateways.map((gw) => (
                   <SelectItem key={gw.id} value={gw.id} className={textSecondary}>
                     {gw.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={selectedGroup} onValueChange={setSelectedGroup}>
+              <SelectTrigger 
+                className={`w-[200px] ${theme === "dark" ? "bg-zinc-950 border-zinc-800 text-zinc-300" : "bg-white border-slate-200 text-slate-700"}`}
+                data-testid="filter-group"
+              >
+                <SelectValue placeholder="Toate Grupurile" />
+              </SelectTrigger>
+              <SelectContent className={theme === "dark" ? "bg-zinc-900 border-zinc-800" : "bg-white border-slate-200"}>
+                <SelectItem value="all" className={textSecondary}>Toate Grupurile</SelectItem>
+                {groups.map((g) => (
+                  <SelectItem key={g.id} value={g.id} className={textSecondary}>
+                    {g.name}
                   </SelectItem>
                 ))}
               </SelectContent>

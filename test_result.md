@@ -315,6 +315,51 @@ backend:
           agent: "testing"
           comment: "Updated alerts endpoint working correctly. GET /api/alerts verified to NOT contain any 'low_battery' type alerts. Only valid alert types present: packet_loss, sf_critical, offline. Response structure includes alerts array, total, critical, warning counts. Currently showing packet_loss and sf_critical alerts in production data. Battery alerts successfully removed from system."
 
+  - task: "Groups CRUD API"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "New CRUD for /api/groups (GET, POST, PUT, DELETE) + /api/groups/{id}/assign-devices. Need testing."
+        - working: true
+          agent: "testing"
+          comment: "All Groups CRUD operations tested successfully. POST /api/groups creates groups with name and description. GET /api/groups returns list of all groups. PUT /api/groups/{id} updates group and cascades group_name to all assigned devices. DELETE /api/groups/{id} removes group and unassigns all devices (sets group_id=null, group_name=null). Group creation/update enforces unique names. All 13/13 group CRUD tests passed."
+
+  - task: "Group Filtering on APIs"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "group_id filter added to: GET /api/devices, /api/uplinks, /api/heatmap, /api/stats, /api/analytics/sf-distribution, /api/analytics/top-problematic. CSV import accepts group_id param. Need testing."
+        - working: true
+          agent: "testing"
+          comment: "All Group Filtering functionality tested successfully. GET /api/devices?group_id={id} returns only devices in that group. GET /api/heatmap?group_id={id} includes group_id and group_name fields, filters correctly. GET /api/stats?group_id={id} counts only group devices/uplinks. GET /api/analytics/sf-distribution?group_id={id} and GET /api/analytics/top-problematic?group_id={id} filter data correctly. Device assignment via PUT /api/devices/{id} with group_id works and auto-resolves group_name. All filtering preserves API structure while showing subset data. 18/18 group filtering tests passed."
+
+  - task: "Webhook tenantName + applicationName"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Webhook extracts tenantName and applicationName from deviceInfo payload, saves in UplinkLog. Need testing."
+        - working: true
+          agent: "testing"
+          comment: "Webhook tenantName/applicationName extraction tested successfully. POST /api/chirpstack/webhook correctly extracts tenantName and applicationName from deviceInfo object in webhook payload. Values stored in UplinkLog records with tenant_name and application_name fields. Verified in uplinks API that tenant information persists correctly. 6/6 webhook tenant tests passed."
+
 frontend:
   - task: "Dashboard with SF Heatmap"
     implemented: true
@@ -402,6 +447,8 @@ test_plan:
 
 agent_communication:
     - agent: "main"
-      message: "Updated backend: removed battery, added frequency extraction, new /api/stats/frequencies endpoint, new DELETE /api/uplinks/unregistered/{dev_eui}, updated alerts (no battery, added sf_critical). Webhook now extracts frequency from txInfo.frequency. Please test NEW endpoints: 1) POST webhook with txInfo.frequency and verify frequency saved in uplink, 2) GET /api/stats/frequencies?gateway_id=AA00BB11CC22DD33 returns frequency distribution, 3) GET /api/alerts no longer returns battery alerts but includes sf_critical, 4) DELETE /api/uplinks/unregistered/{dev_eui} for unregistered devices, 5) Verify /api/recalculate-sf still works."
+      message: "Implemented Groups/Projects system. Backend: CRUD for groups, group_id filter on devices/uplinks/heatmap/stats/analytics endpoints, CSV import with group_id, webhook extracts tenantName/applicationName. Frontend: Groups page, group column in Devices, group select in forms/CSV import, group filter on Dashboard and Analytics. Please test: 1) POST /api/groups create group, 2) PUT device with group_id, 3) GET /api/devices?group_id filter, 4) GET /api/heatmap?group_id filter, 5) GET /api/stats?group_id filter, 6) GET /api/analytics/sf-distribution?group_id, 7) DELETE /api/groups/{id} unassigns devices, 8) POST /api/devices/import-csv with group_id form param."
     - agent: "testing"
       message: "Completed testing of all NEW/UPDATED NOC endpoints. All 24/24 tests passed successfully. Key findings: 1) Webhook frequency extraction working (txInfo.frequency → 868100000 Hz in response), 2) Frequency distribution endpoint functional with proper Hz→MHz conversion and labeling, 3) Alerts endpoint confirmed NO battery alerts, only packet_loss/sf_critical/offline types, 4) Delete unregistered uplinks working correctly, 5) Recalculate SF still operational, 6) Heatmap confirmed to exclude battery_level field. All backend API changes tested and verified working correctly."
+    - agent: "testing"
+      message: "Completed comprehensive testing of Groups/Projects system. All 56/56 tests passed successfully. Key findings: 1) Groups CRUD API fully functional - create/read/update/delete groups with unique name enforcement, 2) Device group assignment working via PUT /api/devices/{id} with auto group_name resolution, 3) All filtering APIs work correctly: devices, heatmap, stats, analytics accept group_id parameter and return filtered data, 4) Heatmap includes group_id/group_name fields, 5) Webhook tenantName/applicationName extraction working and stored in UplinkLog, 6) Group deletion properly unassigns devices (sets group_id=null), 7) Legacy compatibility confirmed - devices without groups work in all endpoints, 8) All required APIs tested: Groups CRUD, device assignment, filtering on devices/heatmap/stats/analytics, webhook tenant extraction."
