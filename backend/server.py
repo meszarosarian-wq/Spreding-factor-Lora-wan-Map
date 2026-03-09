@@ -383,29 +383,60 @@ async def chirpstack_webhook(payload: dict):
         # NORMALIZE DevEUI to UPPERCASE for consistent matching
         dev_eui = raw_dev_eui.upper().strip()
         
-        # Extract spreading factor from txInfo
-        tx_info = payload.get("txInfo", {})
+        # Extract spreading factor - check multiple locations
         spreading_factor = None
         
-        # Method 1: Direct spreadingFactor field
-        if "loraModulationInfo" in tx_info:
-            spreading_factor = tx_info["loraModulationInfo"].get("spreadingFactor")
+        # Method 1: Direct at root level (ChirpStack v4 format)
+        if payload.get("spreadingFactor") is not None:
+            spreading_factor = payload.get("spreadingFactor")
+            logger.info(f"SF from root level: {spreading_factor}")
         
-        # Method 2: From dr (DataRate) - EU868 mapping
+        # Method 2: From rxInfo array (can contain SF per gateway)
+        rx_info_list = payload.get("rxInfo", [])
+        if spreading_factor is None and rx_info_list:
+            for rx_info in rx_info_list:
+                if rx_info.get("spreadingFactor") is not None:
+                    spreading_factor = rx_info.get("spreadingFactor")
+                    logger.info(f"SF from rxInfo: {spreading_factor}")
+                    break
+        
+        # Method 3: From txInfo.loraModulationInfo
+        tx_info = payload.get("txInfo", {})
+        if spreading_factor is None and "loraModulationInfo" in tx_info:
+            spreading_factor = tx_info["loraModulationInfo"].get("spreadingFactor")
+            if spreading_factor:
+                logger.info(f"SF from txInfo.loraModulationInfo: {spreading_factor}")
+        
+        # Method 4: From dr (DataRate) field - EU868 mapping
         if spreading_factor is None:
-            dr = tx_info.get("dr")
+            dr = payload.get("dr") or tx_info.get("dr")
             if dr is not None:
                 sf_mapping = {0: 12, 1: 11, 2: 10, 3: 9, 4: 8, 5: 7}
                 spreading_factor = sf_mapping.get(dr, 7)
+                logger.info(f"SF from dr={dr} mapping: {spreading_factor}")
         
-        # Method 3: Direct sf field
+        # Method 5: Direct sf field in txInfo
         if spreading_factor is None:
-            spreading_factor = tx_info.get("sf", 7)
+            spreading_factor = tx_info.get("sf")
+            if spreading_factor:
+                logger.info(f"SF from txInfo.sf: {spreading_factor}")
         
-        # Extract RSSI and SNR from rxInfo
-        rx_info_list = payload.get("rxInfo", [])
+        # Default fallback
+        if spreading_factor is None:
+            spreading_factor = 7
+            logger.warning(f"SF not found in payload, using default: {spreading_factor}")
+        
+        # Ensure SF is integer
+        spreading_factor = int(spreading_factor)
+        
+        # Extract RSSI and SNR from rxInfo or root level
         if not rx_info_list:
-            rx_info_list = [{"gatewayId": "", "rssi": -100, "snr": 0}]
+            # Build rxInfo from root level fields if not present
+            rx_info_list = [{
+                "gatewayId": payload.get("gatewayId", ""),
+                "rssi": payload.get("rssi", -100),
+                "snr": payload.get("snr", 0)
+            }]
         
         # Find the device in our database:
         # 1. First try by DevEUI (normalized uppercase)
