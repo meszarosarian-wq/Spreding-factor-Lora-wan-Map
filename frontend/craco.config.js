@@ -38,6 +38,23 @@ let webpackConfig = {
     },
     configure: (webpackConfig) => {
 
+      // Fix papaparse: override browser field to use non-minified version (avoids babel stack overflow)
+      if (!webpackConfig.resolve) webpackConfig.resolve = {};
+      if (!webpackConfig.resolve.alias) webpackConfig.resolve.alias = {};
+      webpackConfig.resolve.alias['papaparse'] = require.resolve('papaparse/papaparse.js');
+
+      // Remove ModuleScopePlugin to allow papaparse alias
+      const scopePluginIndex = webpackConfig.resolve.plugins.findIndex(
+        ({ constructor }) => constructor && constructor.name === "ModuleScopePlugin"
+      );
+      if (scopePluginIndex >= 0) {
+        webpackConfig.resolve.plugins.splice(scopePluginIndex, 1);
+      }
+
+      // Add stream polyfill fallback for papaparse non-minified version
+      if (!webpackConfig.resolve.fallback) webpackConfig.resolve.fallback = {};
+      webpackConfig.resolve.fallback.stream = false;
+
       // Add ignored patterns to reduce watched directories
         webpackConfig.watchOptions = {
           ...webpackConfig.watchOptions,

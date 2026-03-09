@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import time
 
 class LoRaWANAPITester:
-    def __init__(self, base_url="https://spreading-factor-viz.preview.emergentagent.com"):
+    def __init__(self, base_url="https://verifica-tool.preview.emergentagent.com"):
         self.base_url = base_url
         self.api_url = f"{base_url}/api"
         self.tests_run = 0
@@ -365,6 +365,42 @@ class LoRaWANAPITester:
                 self.log_test("Seed - Response message", False, "Missing message field")
         return success
 
+    def test_recalculate_sf_endpoint(self):
+        """Test SF recalculation endpoint"""
+        success, response = self.run_test("Recalculate SF", "POST", "recalculate-sf", 200)
+        if success:
+            required_fields = ['status', 'message', 'devices_with_data', 'devices_without_data']
+            for field in required_fields:
+                if field not in response:
+                    self.log_test(f"Recalculate SF - {field} field", False, f"Missing field: {field}")
+                    return False
+            
+            if response['status'] == 'success':
+                self.log_test("Recalculate SF - Success status", True)
+            else:
+                self.log_test("Recalculate SF - Success status", False, f"Status: {response['status']}")
+            
+            self.log_test("Recalculate SF - All fields present", True)
+        return success
+
+    def test_reset_sf_history_endpoint(self):
+        """Test SF history reset endpoint"""
+        success, response = self.run_test("Reset SF History", "POST", "reset-sf-history", 200)
+        if success:
+            required_fields = ['status', 'message', 'devices_reset']
+            for field in required_fields:
+                if field not in response:
+                    self.log_test(f"Reset SF History - {field} field", False, f"Missing field: {field}")
+                    return False
+            
+            if response['status'] == 'success':
+                self.log_test("Reset SF History - Success status", True)
+            else:
+                self.log_test("Reset SF History - Success status", False, f"Status: {response['status']}")
+            
+            self.log_test("Reset SF History - All fields present", True)
+        return success
+
     def run_all_tests(self):
         """Run all API tests"""
         print("🚀 Starting LoRaWAN API Tests...")
@@ -391,6 +427,10 @@ class LoRaWANAPITester:
         
         # Test seed
         self.test_seed_endpoint()
+        
+        # Test SF management endpoints
+        self.test_recalculate_sf_endpoint()
+        self.test_reset_sf_history_endpoint()
 
         # Print summary
         print("=" * 50)
