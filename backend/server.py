@@ -138,7 +138,7 @@ def get_sf_color_category(sf_avg: Optional[float]) -> str:
 
 @api_router.get("/gateways", response_model=List[Gateway])
 async def get_gateways():
-    gateways = await db.gateways.find({}, {"_id": 0}).to_list(1000)
+    gateways = await db.gateways.find({}, {"_id": 0}).to_list(10000)
     return gateways
 
 @api_router.get("/gateways/{gateway_id}", response_model=Gateway)
@@ -189,7 +189,7 @@ async def delete_gateway(gateway_id: str):
 
 @api_router.get("/groups")
 async def get_groups():
-    groups = await db.groups.find({}, {"_id": 0}).to_list(1000)
+    groups = await db.groups.find({}, {"_id": 0}).to_list(10000)
     return groups
 
 @api_router.post("/groups")
@@ -262,7 +262,7 @@ async def get_devices(group_id: Optional[str] = None):
     query = {}
     if group_id:
         query["group_id"] = group_id
-    devices = await db.devices.find(query, {"_id": 0}).to_list(1000)
+    devices = await db.devices.find(query, {"_id": 0}).to_list(10000)
     # Ensure sf_buffer and sf_average are present
     for device in devices:
         if "sf_buffer" not in device:
@@ -349,6 +349,32 @@ async def bulk_delete_devices(device_ids: List[str]):
     return {
         "message": f"{result.deleted_count} dispozitive șterse",
         "deleted_count": result.deleted_count
+    }
+
+class BulkGroupAssign(BaseModel):
+    device_ids: List[str]
+    group_id: Optional[str] = None  # None means unassign
+
+@api_router.post("/devices/bulk-assign-group")
+async def bulk_assign_group(data: BulkGroupAssign):
+    """Assign or unassign multiple devices to/from a group."""
+    if not data.device_ids:
+        raise HTTPException(status_code=400, detail="No device IDs provided")
+    
+    if data.group_id:
+        group = await db.groups.find_one({"id": data.group_id})
+        if not group:
+            raise HTTPException(status_code=404, detail="Group not found")
+        update = {"$set": {"group_id": data.group_id, "group_name": group["name"]}}
+        label = group["name"]
+    else:
+        update = {"$set": {"group_id": None, "group_name": None}}
+        label = "Neasignat"
+    
+    result = await db.devices.update_many({"id": {"$in": data.device_ids}}, update)
+    return {
+        "message": f"{result.modified_count} dispozitive mutate în '{label}'",
+        "modified_count": result.modified_count
     }
 
 @api_router.post("/devices/import-csv")
@@ -828,7 +854,7 @@ async def get_heatmap_data(
     if group_id:
         device_query["group_id"] = group_id
     
-    devices = await db.devices.find(device_query, {"_id": 0}).to_list(1000)
+    devices = await db.devices.find(device_query, {"_id": 0}).to_list(10000)
     
     uplink_query = {}
     if gateway_id:
@@ -855,7 +881,7 @@ async def get_heatmap_data(
         }}
     ]
     
-    latest_uplinks_list = await db.uplinks.aggregate(pipeline).to_list(1000)
+    latest_uplinks_list = await db.uplinks.aggregate(pipeline).to_list(10000)
     uplink_map = {u["_id"]: u for u in latest_uplinks_list}
     
     heatmap_points = []
@@ -1173,7 +1199,7 @@ async def get_gateway_load(gateway_id: Optional[str] = None, hours: int = 24):
         {"$sort": {"_id.hour": 1}}
     ]
     
-    results = await db.uplinks.aggregate(pipeline).to_list(1000)
+    results = await db.uplinks.aggregate(pipeline).to_list(10000)
     
     # Format results
     hourly_data = []

@@ -69,12 +69,15 @@ export default function Devices() {
   // Bulk selection state
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
+  const [bulkGroupDialogOpen, setBulkGroupDialogOpen] = useState(false);
+  const [bulkGroupId, setBulkGroupId] = useState("");
 
   // Search and Sort state
   const [searchTerm, setSearchTerm] = useState("");
   const [sortField, setSortField] = useState("name");
   const [sortDirection, setSortDirection] = useState("asc");
   const [filterSF, setFilterSF] = useState("all");
+  const [filterGroup, setFilterGroup] = useState("all");
 
   // Theme classes
   const cardClass = theme === "dark" ? "bg-zinc-900 border-zinc-800" : "bg-white border-slate-200 shadow-sm";
@@ -133,6 +136,23 @@ export default function Devices() {
     }
   };
 
+  const handleBulkGroupAssign = async () => {
+    try {
+      const ids = Array.from(selectedIds);
+      const res = await axios.post(`${API}/devices/bulk-assign-group`, {
+        device_ids: ids,
+        group_id: bulkGroupId || null
+      });
+      toast.success(res.data.message);
+      setSelectedIds(new Set());
+      setBulkGroupDialogOpen(false);
+      setBulkGroupId("");
+      fetchDevices();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Eroare la schimbarea grupului");
+    }
+  };
+
   // Filtered and sorted data
   const filteredDevices = useMemo(() => {
     let result = [...devices];
@@ -155,6 +175,13 @@ export default function Devices() {
       result = result.filter(d => d.sf_average !== null && d.sf_average > 10.5);
     } else if (filterSF === "nodata") {
       result = result.filter(d => d.sf_average === null || d.sf_buffer?.length === 0);
+    }
+    
+    // Filter by group
+    if (filterGroup === "unassigned") {
+      result = result.filter(d => !d.group_id);
+    } else if (filterGroup && filterGroup !== "all") {
+      result = result.filter(d => d.group_id === filterGroup);
     }
     
     // Sort
@@ -209,11 +236,12 @@ export default function Devices() {
   const clearFilters = () => {
     setSearchTerm("");
     setFilterSF("all");
+    setFilterGroup("all");
     setSortField("name");
     setSortDirection("asc");
   };
 
-  const hasActiveFilters = searchTerm || filterSF !== "all" || sortField !== "name";
+  const hasActiveFilters = searchTerm || filterSF !== "all" || filterGroup !== "all" || sortField !== "name";
 
   // Export devices to CSV
   const exportDevicesToCSV = () => {
@@ -375,11 +403,24 @@ export default function Devices() {
                 <SelectValue placeholder="Calitate SF" />
               </SelectTrigger>
               <SelectContent className={dialogClass}>
-                <SelectItem value="all">Toate</SelectItem>
+                <SelectItem value="all">Toate SF</SelectItem>
                 <SelectItem value="good">🟢 Excelent (≤8.5)</SelectItem>
                 <SelectItem value="medium">🟠 Mediu (8.6-10.5)</SelectItem>
                 <SelectItem value="bad">🔴 Slab (&gt;10.5)</SelectItem>
                 <SelectItem value="nodata">⚪ Fără date</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={filterGroup} onValueChange={setFilterGroup}>
+              <SelectTrigger className={`w-[180px] ${inputClass}`}>
+                <SelectValue placeholder="Toate Grupurile" />
+              </SelectTrigger>
+              <SelectContent className={dialogClass}>
+                <SelectItem value="all">Toate Grupurile</SelectItem>
+                <SelectItem value="unassigned">— Neasignate —</SelectItem>
+                {groups.map(g => (
+                  <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
 
@@ -410,6 +451,30 @@ export default function Devices() {
         </CardContent>
       </Card>
 
+      {/* Bulk Action Bar */}
+      {selectedIds.size > 0 && (
+        <Card className={`${cardClass} border-l-4 border-l-blue-500`}>
+          <CardContent className="p-3">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <CheckSquare className="w-5 h-5 text-blue-500" />
+                <span className={`text-sm font-semibold ${textPrimary}`}>{selectedIds.size} selectate</span>
+              </div>
+              <Button size="sm" variant="outline" onClick={() => setBulkGroupDialogOpen(true)}
+                className={theme === "dark" ? "border-blue-700 text-blue-400" : "border-blue-300 text-blue-600"}>
+                Schimbă Grupul
+              </Button>
+              <Button size="sm" variant="destructive" onClick={() => setBulkDeleteDialogOpen(true)}>
+                <Trash2 className="w-4 h-4 mr-1" />Șterge ({selectedIds.size})
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())} className={textSecondary}>
+                Deselectează tot
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Devices Table */}
       <Card className={cardClass}>
         <CardHeader>
@@ -431,6 +496,13 @@ export default function Devices() {
               <Table>
                 <TableHeader>
                   <TableRow className={theme === "dark" ? "border-zinc-800" : "border-slate-200"}>
+                    <TableHead className="w-10">
+                      <Checkbox
+                        checked={filteredDevices.length > 0 && selectedIds.size === filteredDevices.length}
+                        onCheckedChange={toggleSelectAll}
+                        className="border-zinc-600"
+                      />
+                    </TableHead>
                     <TableHead className={`font-mono text-xs uppercase ${textMuted} cursor-pointer hover:text-blue-500`} onClick={() => handleSort("name")}>
                       <span className="flex items-center">Nume<SortIcon field="name" /></span>
                     </TableHead>
@@ -454,7 +526,14 @@ export default function Devices() {
                 </TableHeader>
                 <TableBody>
                   {filteredDevices.map((device) => (
-                    <TableRow key={device.id} className={theme === "dark" ? "border-zinc-800/50 hover:bg-zinc-900/50" : "border-slate-100 hover:bg-slate-50"}>
+                    <TableRow key={device.id} className={`${theme === "dark" ? "border-zinc-800/50 hover:bg-zinc-900/50" : "border-slate-100 hover:bg-slate-50"} ${selectedIds.has(device.id) ? (theme === "dark" ? "bg-blue-950/30" : "bg-blue-50") : ""}`}>
+                      <TableCell className="w-10">
+                        <Checkbox
+                          checked={selectedIds.has(device.id)}
+                          onCheckedChange={() => toggleSelect(device.id)}
+                          className="border-zinc-600"
+                        />
+                      </TableCell>
                       <TableCell className={`font-medium ${textPrimary}`}>{device.name}</TableCell>
                       <TableCell className={`font-mono text-xs ${textSecondary}`}>{device.dev_eui}</TableCell>
                       <TableCell className={`font-mono text-sm ${textSecondary}`}>{device.latitude.toFixed(4)}</TableCell>
@@ -624,6 +703,56 @@ export default function Devices() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setBufferDialogOpen(false)}>Închide</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Delete Dialog */}
+      <Dialog open={bulkDeleteDialogOpen} onOpenChange={setBulkDeleteDialogOpen}>
+        <DialogContent className={dialogClass}>
+          <DialogHeader>
+            <DialogTitle className="text-red-500">Ștergere în Grup</DialogTitle>
+            <DialogDescription className={textSecondary}>
+              Ești sigur că vrei să ștergi <strong>{selectedIds.size}</strong> dispozitive selectate? Această acțiune nu poate fi anulată.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkDeleteDialogOpen(false)}>Anulează</Button>
+            <Button onClick={handleBulkDelete} className="bg-red-600 hover:bg-red-500 text-white">
+              <Trash2 className="w-4 h-4 mr-1" />Șterge {selectedIds.size} dispozitive
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Group Change Dialog */}
+      <Dialog open={bulkGroupDialogOpen} onOpenChange={setBulkGroupDialogOpen}>
+        <DialogContent className={dialogClass}>
+          <DialogHeader>
+            <DialogTitle className={textPrimary}>Schimbă Grupul</DialogTitle>
+            <DialogDescription className={textSecondary}>
+              Selectează grupul pentru <strong>{selectedIds.size}</strong> dispozitive. Selectează "Neasignat" pentru a le scoate din orice grup.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <Label className={textSecondary}>Grup nou</Label>
+            <Select value={bulkGroupId || "none"} onValueChange={(val) => setBulkGroupId(val === "none" ? "" : val)}>
+              <SelectTrigger className={inputClass}>
+                <SelectValue placeholder="Selectează grup" />
+              </SelectTrigger>
+              <SelectContent className={dialogClass}>
+                <SelectItem value="none" className={textSecondary}>— Neasignat —</SelectItem>
+                {groups.map(g => (
+                  <SelectItem key={g.id} value={g.id} className={textSecondary}>{g.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkGroupDialogOpen(false)}>Anulează</Button>
+            <Button onClick={handleBulkGroupAssign} className="bg-blue-600 hover:bg-blue-500 text-white">
+              Aplică pentru {selectedIds.size} dispozitive
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
