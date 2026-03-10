@@ -1264,6 +1264,53 @@ async def get_device_list_for_analytics():
     return devices
 
 
+    return devices
+
+
+@api_router.get("/analytics/noise")
+async def get_noise_stats():
+    """
+    Get unregistered device traffic stats (noise).
+    Returns: list of unregistered DevEUIs with message count and last seen.
+    """
+    pipeline = [
+        {"$match": {"device_registered": False}},
+        {"$group": {
+            "_id": "$dev_eui",
+            "message_count": {"$sum": 1},
+            "last_seen": {"$max": "$timestamp"},
+            "avg_rssi": {"$avg": "$rssi"},
+            "avg_snr": {"$avg": "$snr"},
+            "sfs_used": {"$addToSet": "$spreading_factor"}
+        }},
+        {"$sort": {"message_count": -1}}
+    ]
+    
+    results = await db.uplinks.aggregate(pipeline).to_list(100)
+    
+    total_registered = await db.uplinks.count_documents({"device_registered": True})
+    total_unregistered = await db.uplinks.count_documents({"device_registered": False})
+    
+    noise_devices = []
+    for r in results:
+        noise_devices.append({
+            "dev_eui": r["_id"],
+            "message_count": r["message_count"],
+            "last_seen": r.get("last_seen"),
+            "avg_rssi": round(r.get("avg_rssi", 0), 1),
+            "avg_snr": round(r.get("avg_snr", 0), 1),
+            "sfs_used": sorted(r.get("sfs_used", []))
+        })
+    
+    return {
+        "noise_devices": noise_devices,
+        "total_noise_messages": total_unregistered,
+        "total_registered_messages": total_registered,
+        "noise_percentage": round(total_unregistered / max(total_registered + total_unregistered, 1) * 100, 1),
+        "unique_noise_devices": len(noise_devices)
+    }
+
+
 @api_router.get("/stats/frequencies")
 async def get_frequency_distribution(gateway_id: Optional[str] = None):
     """

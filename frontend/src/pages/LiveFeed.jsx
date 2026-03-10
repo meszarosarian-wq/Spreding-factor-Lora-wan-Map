@@ -361,46 +361,6 @@ export default function LiveFeed() {
         </CardContent>
       </Card>
 
-      {/* Unregistered Devices Alert */}
-      {unregisteredDevices.length > 0 && (
-        <Card className={`${cardClass} ${warningCardClass}`}>
-          <CardContent className="p-4">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 text-red-500 mt-0.5" />
-              <div className="flex-1">
-                <p className="text-sm font-semibold text-red-500">{unregisteredDevices.length} Dispozitiv(e) Neînregistrat(e)</p>
-                <div className="flex flex-wrap gap-2 mt-3">
-                  {unregisteredDevices.slice(0, 5).map((dev) => (
-                    <div key={dev.dev_eui} className={`flex items-center gap-2 px-3 py-2 rounded border ${theme === "dark" ? "bg-zinc-950 border-zinc-800" : "bg-white border-slate-200"}`}>
-                      <div>
-                        <p className={`font-mono text-xs ${textPrimary}`}>{dev.dev_eui.substring(0, 12)}...</p>
-                        <p className={`text-xs ${textMuted}`}>{dev.message_count} msg</p>
-                      </div>
-                      <div className="flex gap-1">
-                        <Button size="sm" onClick={() => openRegisterDialog(dev.dev_eui)} className="bg-blue-600 hover:bg-blue-500 text-white h-7 px-2" title="Înregistrează">
-                          <Plus className="w-3 h-3" />
-                        </Button>
-                        <Button size="sm" variant="destructive" onClick={async () => {
-                          try {
-                            await axios.delete(`${API}/uplinks/unregistered/${dev.dev_eui}`);
-                            toast.success(`Dispozitiv ${dev.dev_eui.substring(0, 8)}... ignorat`);
-                            fetchData();
-                          } catch (e) {
-                            toast.error("Eroare la ștergere");
-                          }
-                        }} className="h-7 px-2" title="Ignoră / Șterge">
-                          <X className="w-3 h-3" />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
       {/* Search and Filters */}
       <Card className={cardClass}>
         <CardContent className="p-4">

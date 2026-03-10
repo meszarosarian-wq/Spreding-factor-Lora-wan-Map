@@ -39,6 +39,7 @@ export default function Analytics() {
   const [deviceSearch, setDeviceSearch] = useState("");
   const [selectedGroupFilter, setSelectedGroupFilter] = useState("all");
   const [groups, setGroups] = useState([]);
+  const [noiseData, setNoiseData] = useState({ noise_devices: [], total_noise_messages: 0, noise_percentage: 0, unique_noise_devices: 0, total_registered_messages: 0 });
   const [loading, setLoading] = useState(true);
 
   // Theme-based colors
@@ -118,14 +119,23 @@ export default function Analytics() {
     }
   }, [selectedDevice]);
 
+  const fetchNoise = useCallback(async () => {
+    try {
+      const res = await axios.get(`${API}/analytics/noise`);
+      setNoiseData(res.data);
+    } catch (e) {
+      console.error("Error fetching noise data:", e);
+    }
+  }, []);
+
   useEffect(() => {
     const loadAll = async () => {
       setLoading(true);
-      await Promise.all([fetchAlerts(), fetchSfDistribution(), fetchDevices()]);
+      await Promise.all([fetchAlerts(), fetchSfDistribution(), fetchDevices(), fetchNoise()]);
       setLoading(false);
     };
     loadAll();
-  }, [fetchAlerts, fetchSfDistribution, fetchDevices]);
+  }, [fetchAlerts, fetchSfDistribution, fetchDevices, fetchNoise]);
 
   useEffect(() => {
     fetchTopProblematic();
@@ -146,7 +156,8 @@ export default function Analytics() {
       fetchSfDistribution(),
       fetchTopProblematic(),
       fetchRfQuality(),
-      fetchGatewayLoad()
+      fetchGatewayLoad(),
+      fetchNoise()
     ]);
     setLoading(false);
   };
@@ -547,6 +558,86 @@ export default function Analytics() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Noise / Unregistered Traffic Chart */}
+      <Card className={cardClass}>
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between">
+            <CardTitle className={`text-base font-heading ${textPrimary} flex items-center gap-2`}>
+              <WifiOff className="w-5 h-5 text-zinc-500" />
+              Zgomot de Rețea (Dispozitive Neînregistrate)
+            </CardTitle>
+            <div className="flex items-center gap-3">
+              <span className={`text-xs font-mono px-2 py-0.5 rounded ${noiseData.noise_percentage > 20 ? "bg-amber-500/20 text-amber-400" : "bg-zinc-500/20 text-zinc-400"}`}>
+                {noiseData.noise_percentage}% zgomot
+              </span>
+              <span className={`text-xs ${textMuted}`}>
+                {noiseData.total_noise_messages} mesaje de la {noiseData.unique_noise_devices} surse necunoscute
+              </span>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {noiseData.noise_devices.length === 0 ? (
+            <div className={`h-48 flex items-center justify-center ${textMuted}`}>
+              <p className="text-sm">Nu există trafic de la dispozitive neînregistrate</p>
+            </div>
+          ) : (
+            <div>
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={noiseData.noise_devices.slice(0, 15)} margin={{ left: 10, bottom: 40 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
+                  <XAxis
+                    dataKey="dev_eui"
+                    tick={{ fill: theme === "dark" ? "#71717a" : "#94a3b8", fontSize: 9 }}
+                    angle={-35}
+                    textAnchor="end"
+                    height={60}
+                    tickFormatter={(v) => v.length > 10 ? v.substring(0, 8) + "..." : v}
+                  />
+                  <YAxis tick={{ fill: theme === "dark" ? "#a1a1aa" : "#64748b", fontSize: 11 }} />
+                  <RechartsTooltip
+                    contentStyle={{
+                      backgroundColor: tooltipBg,
+                      border: `1px solid ${tooltipBorder}`,
+                      borderRadius: "8px",
+                      fontSize: "12px"
+                    }}
+                    content={({ active, payload }) => {
+                      if (!active || !payload?.length) return null;
+                      const d = payload[0].payload;
+                      return (
+                        <div className={`p-2 rounded border text-xs ${theme === "dark" ? "bg-zinc-900 border-zinc-700 text-zinc-300" : "bg-white border-slate-200 text-slate-700"}`}>
+                          <p className="font-mono font-bold">{d.dev_eui}</p>
+                          <p>{d.message_count} mesaje</p>
+                          <p>RSSI mediu: {d.avg_rssi} dBm</p>
+                          <p>SNR mediu: {d.avg_snr} dB</p>
+                          <p>SF folosite: {d.sfs_used?.join(", ")}</p>
+                        </div>
+                      );
+                    }}
+                  />
+                  <Bar dataKey="message_count" name="Mesaje" radius={[4, 4, 0, 0]}>
+                    {noiseData.noise_devices.slice(0, 15).map((_, index) => (
+                      <Cell key={index} fill={theme === "dark" ? "#52525b" : "#94a3b8"} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+              <div className="flex items-center justify-center gap-6 mt-2">
+                <div className={`flex items-center gap-2 text-xs ${textMuted}`}>
+                  <div className="w-3 h-3 rounded bg-emerald-500"></div>
+                  <span>Înregistrate: {noiseData.total_registered_messages}</span>
+                </div>
+                <div className={`flex items-center gap-2 text-xs ${textMuted}`}>
+                  <div className={`w-3 h-3 rounded ${theme === "dark" ? "bg-zinc-600" : "bg-slate-400"}`}></div>
+                  <span>Zgomot: {noiseData.total_noise_messages}</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
