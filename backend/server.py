@@ -1172,31 +1172,51 @@ async def get_rf_quality(dev_eui: str, days: int = 7):
 async def get_gateway_load(gateway_id: Optional[str] = None, hours: int = 24):
     """
     Gateway traffic load: uplinks per hour over the last N hours.
-    Used for Area/Bar chart to monitor duty cycle.
+    When gateway_id is provided, matches against all known aliases (id, dev_eui, case-insensitive).
     """
     start_time = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
     
     match_stage = {"timestamp": {"$gte": start_time}}
-    if gateway_id:
-        match_stage["gateway_id"] = gateway_id
     
-    # Aggregate uplinks per hour
+    if gateway_id:
+        # Find the gateway to get all its identifiers
+        gw = await db.gateways.find_one({
+            "$or": [
+                {"dev_eui": gateway_id},
+                {"id": gateway_id},
+                {"dev_eui": gateway_id.upper()},
+                {"id": gateway_id.lower()}
+            ]
+        })
+        
+        if gw:
+            # Match against all known identifiers for this gateway
+            gw_aliases = set()
+            gw_aliases.add(gw.get("dev_eui", ""))
+            gw_aliases.add(gw.get("id", ""))
+            gw_aliases.add(gw.get("dev_eui", "").upper())
+            gw_aliases.add(gw.get("dev_eui", "").lower())
+            gw_aliases.add(gw.get("id", "").upper())
+            gw_aliases.add(gw.get("id", "").lower())
+            gw_aliases.discard("")
+            match_stage["gateway_id"] = {"$in": list(gw_aliases)}
+        else:
+            # Fallback: match exact or case-insensitive
+            match_stage["gateway_id"] = {"$in": [gateway_id, gateway_id.upper(), gateway_id.lower()]}
+    
+    # Aggregate uplinks per hour (aggregate ALL gateways per hour)
     pipeline = [
         {"$match": match_stage},
         {"$addFields": {
             "hour_str": {"$substr": ["$timestamp", 0, 13]}  # Extract YYYY-MM-DDTHH
         }},
         {"$group": {
-            "_id": {
-                "hour": "$hour_str",
-                "gateway_id": "$gateway_id",
-                "gateway_name": "$gateway_name"
-            },
+            "_id": "$hour_str",
             "count": {"$sum": 1},
             "avg_rssi": {"$avg": "$rssi"},
             "avg_snr": {"$avg": "$snr"}
         }},
-        {"$sort": {"_id.hour": 1}}
+        {"$sort": {"_id": 1}}
     ]
     
     results = await db.uplinks.aggregate(pipeline).to_list(10000)
@@ -1205,22 +1225,29 @@ async def get_gateway_load(gateway_id: Optional[str] = None, hours: int = 24):
     hourly_data = []
     for r in results:
         hourly_data.append({
-            "hour": r["_id"]["hour"],
-            "gateway_id": r["_id"].get("gateway_id", ""),
-            "gateway_name": r["_id"].get("gateway_name", "Unknown"),
+            "hour": r["_id"],
             "count": r["count"],
             "avg_rssi": round(r.get("avg_rssi", 0), 1),
             "avg_snr": round(r.get("avg_snr", 0), 1)
         })
     
-    # Also get available gateways for dropdown
+    # Get available gateways for dropdown
     gateways = await db.gateways.find({}, {"_id": 0, "id": 1, "name": 1, "dev_eui": 1}).to_list(100)
+    
+    # Deduplicate gateways by dev_eui
+    seen = set()
+    unique_gateways = []
+    for g in gateways:
+        key = g.get("dev_eui", g.get("id"))
+        if key not in seen:
+            seen.add(key)
+            unique_gateways.append(g)
     
     return {
         "hourly_data": hourly_data,
         "hours": hours,
         "gateway_filter": gateway_id,
-        "gateways": gateways
+        "gateways": unique_gateways
     }
 
 
